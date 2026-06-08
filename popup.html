@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iCloud Hide My Email Deactivator</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-glow"></div>
+        <span class="logo-icon">🛡️</span>
+        <h1>HME Deactivator</h1>
+      </div>
+      <div class="header-right">
+        <div class="lang-switch">
+          <button id="btnLangEN" class="lang-btn active">EN</button>
+          <button id="btnLangTR" class="lang-btn">TR</button>
+        </div>
+        <div class="status-badge" id="botStatusBadge">Idle</div>
+      </div>
+    </header>
+
+    <!-- Mode Selector Card -->
+    <section class="card glass-card mode-card">
+      <div class="form-group">
+        <label for="selectMode">Çalışma Modülü</label>
+        <select id="selectMode" class="select-dropdown">
+          <option value="deactivate">Devre Dışı Bırak (Aktif ➔ Pasif)</option>
+          <option value="delete">Kalıcı Olarak Sil (Pasif ➔ Sil)</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Main Content Grid -->
+    <main class="app-content">
+      <!-- Section 1: Training -->
+      <section class="card glass-card">
+        <div class="card-header">
+          <span class="step-num">1</span>
+          <h2>Eğitim Modu (Setup)</h2>
+        </div>
+        <p class="card-desc">iCloud arayüzündeki öğeleri bota öğretmek için eğitimi başlatın.</p>
+        
+        <div class="btn-group">
+          <button id="btnStartTraining" class="btn btn-primary">
+            <span class="btn-icon">🎯</span> Eğitimi Başlat
+          </button>
+          <button id="btnResetTraining" class="btn btn-secondary" disabled>
+            Sıfırla
+          </button>
+        </div>
+
+        <!-- Selector status list -->
+        <div class="selector-status-list">
+          <div class="selector-item" id="selEmail">
+            <span class="dot"></span>
+            <span class="label">E-posta Ögesi</span>
+            <span class="badge" id="badgeEmail">Seçilmedi</span>
+          </div>
+          <div class="selector-item" id="selDeactivate">
+            <span class="dot"></span>
+            <span class="label">Devre Dışı Bırak Butonu</span>
+            <span class="badge" id="badgeDeactivate">Seçilmedi</span>
+          </div>
+          <div class="selector-item" id="selConfirm">
+            <span class="dot"></span>
+            <span class="label">Onay Butonu</span>
+            <span class="badge" id="badgeConfirm">Seçilmedi</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Configuration & Control -->
+      <section class="card glass-card">
+        <div class="card-header">
+          <span class="step-num">2</span>
+          <h2>Bot Kontrol Paneli</h2>
+        </div>
+        
+        <div class="form-group row">
+          <div class="col">
+            <label for="inputDelay">Gecikme (ms)</label>
+            <input type="number" id="inputDelay" min="500" max="10000" value="1500" step="100">
+          </div>
+          <div class="col">
+            <label for="inputLimit">Limit (Adet)</label>
+            <input type="number" id="inputLimit" min="1" max="1000" value="50">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 10px; display: flex; flex-direction: column; gap: 4px;">
+          <label for="inputFlags">Atlanacak E-postalar (Kara Liste Kelimeleri)</label>
+          <input type="text" id="inputFlags" placeholder="örn: netflix, amazon, personal">
+        </div>
+
+        <div class="btn-group-row">
+          <button id="btnStartBot" class="btn btn-success" disabled>
+            <span class="btn-icon">⚡</span> Botu Başlat
+          </button>
+          <button id="btnPauseBot" class="btn btn-warning" disabled>
+            Duraklat
+          </button>
+          <button id="btnStopBot" class="btn btn-danger" disabled>
+            Durdur
+          </button>
+        </div>
+
+        <!-- Progress bar container -->
+        <div class="progress-container hidden" id="progressContainer">
+          <div class="progress-info">
+            <span id="progressText">İlerleme: 0 / 50</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Live Logs -->
+      <section class="card glass-card log-card">
+        <div class="card-header justify-between">
+          <h2>İşlem Günlüğü (Logs)</h2>
+          <button id="btnClearLogs" class="btn-text">Temizle</button>
+        </div>
+        <div class="log-console" id="logConsole">
+          <div class="log-entry system">Bot hazır. Başlamak için eğitimi tamamlayın veya kayıtlı şablonu kullanın.</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>iCloud.com/icloudplus sayfasında açık olmalıdır.</span>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
