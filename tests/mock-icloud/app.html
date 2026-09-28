@@ -414,10 +414,19 @@
   // #btn-copy is intentionally a no-op.
 
   // --------------------------------------------------------------- Escape
+  // Real Apple behaviour: Escape anywhere collapses the whole HME app, not just
+  // the panel. Reproduces the user's report so the bot must never send a
+  // synthetic document-wide Escape mid-run.
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    if (!modal.classList.contains('hidden')) { closeModal(); return; }
-    if (!detailPanel.classList.contains('hidden')) hidePanel();
+    window.__escapeCount = (window.__escapeCount || 0) + 1;
+    closeModal();
+    hidePanel();
+    if (window.__escapeCollapses) {
+      // whole-app collapse: the list becomes unavailable for a while
+      document.body.classList.add('app-collapsed');
+      setTimeout(function () { document.body.classList.remove('app-collapsed'); }, 1200);
+    }
   });
 
   // ------------------------------------------------------------ test hooks
@@ -428,6 +437,9 @@
     clicks: window.__clicks,
     failNext: function (n) { window.__failNext = n; },
     setLoadDelay: function (ms) { LOAD_DELAY = ms; },
+    setPanelDelay: function (ms) { PANEL_DELAY = ms; },
+    escapeCollapses: function (on) { window.__escapeCollapses = !!on; },
+    escaped: function () { return window.__escapeCount || 0; },
 
     setLabel: function (email, label) {
       var item = findItem(email);

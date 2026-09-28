@@ -50,6 +50,7 @@ const locales = {
     err_selector_empty: 'List items not found at all — the trained selector may no longer match. Retrain this module.',
     mode_rename_pick: 'Choose Deactivate or Delete in the Run tab before starting the bot.',
     err_wrong_frame: 'Wrong frame: HME content not detected here. Reopen the extension on the Hide My Email page.',
+    relinked: 'Selector repaired automatically: {sel}',
     untrained_rename_hint: 'Rename training: 1) email item, 2) label input, 3) Save button.',
     overlay_title: 'HME Bot',
     overlay_training: 'Training',
@@ -123,6 +124,7 @@ const locales = {
     err_selector_empty: 'Hiç liste öğesi bulunamadı — eğitilmiş seçici artık eşleşmiyor olabilir. Bu modülü yeniden eğitin.',
     mode_rename_pick: 'Botu başlatmadan önce Çalıştır sekmesinden Devre Dışı Bırak veya Sil modülünü seçin.',
     err_wrong_frame: 'Yanlış çerçeve: burada HME içeriği bulunamadı. Eklentiyi E-postamı Gizle sayfasında yeniden açın.',
+    relinked: 'Seçici otomatik onarıldı: {sel}',
     untrained_rename_hint: 'Yeniden adlandırma eğitimi: 1) e-posta öğesi, 2) etiket alanı, 3) Kaydet butonu.',
     overlay_title: 'HME Bot',
     overlay_training: 'Eğitim',
@@ -414,40 +416,67 @@ function isVisible(el) {
 
 function textOf(el) { return ((el.textContent || '') + ' ' + (el.getAttribute && (el.getAttribute('aria-label') || '') || '') + ' ' + (el.value || '')).trim(); }
 
-function findElement(config) {
+function findElement(config, opts) {
   if (!config) return null;
-  // 1. CSS selector — prefer visible
+  const { requireEnabled = true } = opts || {};
+  const ok = el => {
+    if (!el || !isVisible(el)) return false;
+    if (requireEnabled && el.disabled) return false;
+    if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+    return true;
+  };
+  // 1. CSS selector — prefer visible + enabled
   if (config.selector) {
     try {
       const all = [...document.querySelectorAll(config.selector)];
+      const good = all.find(ok);
+      if (good) return good;
       const vis = all.find(isVisible);
-      if (vis) return vis;
-      if (all.length) return all[0];
+      if (vis) return requireEnabled && vis.disabled ? null : vis;
     } catch (e) {}
   }
-  // 2. attribute-based (inputs & buttons)
+  // 2. attribute-based (inputs & buttons) — skip generic type/role, they match
+  //    every button on the page and would hit the wrong control
   if (config.attrs) {
     for (const [attr, val] of Object.entries(config.attrs)) {
-      if (!val) continue;
+      if (!val || attr === 'type' || attr === 'role') continue;
       try {
-        const el = [...document.querySelectorAll(`[${attr}="${CSS.escape(val)}"]`)].find(isVisible);
+        const el = [...document.querySelectorAll(`[${attr}="${CSS.escape(val)}"]`)].find(ok);
         if (el) return el;
       } catch (e) {}
     }
   }
-  // 3. text scan over interactive elements — pick most specific (shortest text)
-  const want = (config.text || '').trim().toLowerCase();
+  // 3. text scan — Apple renders the label in nested spans, so match on the
+  //    button's own normalized text; also accept a distinctive substring in
+  //    either direction (trained "E-posta adresini sil" vs UI "Sil")
+  const want = normalizeLabel(config.text || '');
   if (want) {
-    let best = null;
+    const cands = [];
     for (const el of document.querySelectorAll('button, [role="button"], a, input[type="submit"], input[type="button"]')) {
-      const label = textOf(el).toLowerCase();
-      if (label === want || label.includes(want)) {
-        if (!best || textOf(el).length < textOf(best).length) best = el;
-      }
+      if (!ok(el)) continue;
+      const label = normalizeLabel(textOf(el));
+      if (!label) continue;
+      const exact = label === want;
+      const contains = label.includes(want) || want.includes(label);
+      if (exact || contains) cands.push({ el, exact, len: label.length, text: label });
     }
-    if (best) return best;
+    if (cands.length) {
+      cands.sort((a, b) => (b.exact - a.exact) || (a.len - b.len));
+      return cands[0].el;
+    }
   }
   return null;
+}
+
+// Collapse whitespace, drop punctuation: makes "E-posta Adresini  Sil! " and
+// "eposta adresini sil" comparable, and lets short UI labels match long ones.
+function normalizeLabel(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u')
+    .replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 function extractEmail(el) {
@@ -472,11 +501,44 @@ function extractEmail(el) {
   return m ? m[0].toLowerCase() : '';
 }
 
-function pressEscape() {
-  const ev = () => new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true });
-  try { document.activeElement && document.activeElement.dispatchEvent(ev()); } catch (e) {}
-  try { document.dispatchEvent(ev()); } catch (e) {}
-  try { document.body.dispatchEvent(ev()); } catch (e) {}
+// Escape is GLOBAL on a real site: pressing it can close the whole HME app
+// (the user's report: panel opens, everything collapses back to the main
+// screen). So we never fire a synthetic document-wide Escape during a run.
+// We only click a visible, real dismiss control (modal cancel / close button)
+// that belongs to the container we opened, and only as a last resort.
+function findDismissControl(containers) {
+  const LABEL = /cancel|close|dismiss|kapat|iptal|vazgeç|geri|back|not now|daha sonra|skip/i;
+  const cands = [];
+  for (const c of containers) {
+    if (!c || !c.querySelectorAll) continue;
+    for (const el of c.querySelectorAll('button, [role="button"], a')) {
+      if (!isVisible(el)) continue;
+      const label = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).trim();
+      const cls = (typeof el.className === 'string' ? el.className : '');
+      if (LABEL.test(label) || /close|cancel|dismiss/i.test(cls)) cands.push(el);
+    }
+  }
+  // prefer the smallest/most specific control (a modal's own button, not a page-level one)
+  cands.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+  return cands[0] || null;
+}
+
+// Containers whose own Cancel/Close control we may click to undo an action.
+const DISMISS_SCOPES = [
+  '[role="dialog"]', '[role="alertdialog"]', 'dialog[open]',
+  '[class*="modal" i]', '[class*="dialog" i]', '[class*="sheet" i]', '[class*="overlay" i]'
+];
+// Safe cleanup: dismiss only what we opened. Never a global Escape.
+function dismissUi(scopeSelectors) {
+  const containers = [];
+  for (const sel of scopeSelectors) {
+    const el = document.querySelector(sel);
+    if (el) containers.push(el);
+  }
+  containers.push(document.body);
+  const btn = findDismissControl(containers);
+  if (btn) { try { btn.click(); return true; } catch (e) {} }
+  return false;
 }
 
 function setInputValue(input, value) {
@@ -907,6 +969,31 @@ function waitForStableInput(getInput, timeout = 5000) {
   }, { timeout, interval: 100 });
 }
 
+// Apple changes class names; the trained *text* is stable. When the stored CSS
+// selector stops matching, rebuild it from the element that carries the trained
+// text and persist the fresh selector (self-healing, no retraining needed).
+function relinkSelectorFromText(key) {
+  const cfg = state.selectors[key];
+  if (!cfg || !cfg.text) return false;
+  const want = normalizeLabel(cfg.text);
+  if (!want) return false;
+  for (const el of document.querySelectorAll('button, [role="button"], input, a')) {
+    if (!isVisible(el)) continue;
+    if (normalizeLabel(textOf(el)) !== want) continue;
+    if (el.id) {
+      const sel = '#' + CSS.escape(el.id);
+      if (state.cachedSelectors[state.mode]) {
+        state.cachedSelectors[state.mode][key] = { ...cfg, selector: sel };
+        state.selectors[key] = { ...cfg, selector: sel };
+        chrome.storage.local.set({ ['hmeSelectors_' + state.mode]: state.cachedSelectors[state.mode] });
+        addLog('system', t('relinked', { sel }));
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 async function processItem(item) {
   const email = extractEmail(item);
   state.currentItem = email;
@@ -922,40 +1009,41 @@ async function processItem(item) {
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     if (!active()) return;
-    let actionEl = await waitFor(() => {
+    const findAction = () => {
       const el = findElement(state.selectors.deactivate);
       return el && isVisible(el) && !el.disabled ? el : null;
-    }, { timeout: 5000 });
+    };
+    let actionEl = await waitFor(findAction, { timeout: 4000 });
+    if (!actionEl) {
+      // The trained CSS may no longer match Apple's current markup: re-link the
+      // selector from the trained TEXT (same way training named it) instead of
+      // burning seconds and collapsing the panel.
+      relinkSelectorFromText('deactivate');
+      actionEl = await waitFor(findAction, { timeout: 2500 });
+    }
     if (!actionEl) {
       // stale-node click (delegated listeners ignore detached nodes): re-click fresh node once
       const fresh = freshItemNode(email);
       if (fresh) {
         try { fresh.scrollIntoView({ block: 'center' }); } catch (e) {}
         fresh.click();
-        actionEl = await waitFor(() => {
-          const el = findElement(state.selectors.deactivate);
-          return el && isVisible(el) && !el.disabled ? el : null;
-        }, { timeout: 3500 });
+        actionEl = await waitFor(findAction, { timeout: 2500 });
       }
     }
     if (actionEl) {
       // panel may still show the PREVIOUS item — wait until it binds to this email
-      await waitForPanelBinding(() => {
-        const el = findElement(state.selectors.deactivate);
-        return el && isVisible(el) ? el : null;
-      }, email);
-      actionEl = findElement(state.selectors.deactivate);
-      if (!actionEl || !isVisible(actionEl) || actionEl.disabled) actionEl = null;
+      await waitForPanelBinding(findAction, email);
+      actionEl = findAction();
     }
     if (!actionEl) {
-      pressEscape();
+      dismissUi(DISMISS_SCOPES);
       state.skipSet.add(email);
       learnMismatchSection(freshItemNode(email) || item);
       state.stats.mismatch++;
       addLog('warning', t('err_action_missing', { email }));
       return;
     }
-    if (!active()) { pressEscape(); return; }   // user stopped mid-step
+    if (!active()) { dismissUi(DISMISS_SCOPES); return; }   // user stopped mid-step
     actionEl.click();
 
     const confirmEl = await waitFor(() => {
@@ -963,14 +1051,16 @@ async function processItem(item) {
       return el && isVisible(el) && !el.disabled ? el : null;
     }, { timeout: 5000 });
     if (!confirmEl) {
-      pressEscape();
+      // A modal we opened is still open: close it via its own control, never a
+      // page-wide Escape (that collapsed the whole HME app on the real site).
+      dismissUi(DISMISS_SCOPES);
       if (attempt === 2) { state.stats.failed++; state.skipSet.add(email); addLog('error', t('err_confirm_missing', { email })); return; }
       addLog('warning', t('retry_note', { email }));
       await sleep(500);
       continue;
     }
     const snap = snapshotItem(freshItemNode(email) || item);
-    if (!active()) { pressEscape(); return; }   // never confirm after STOP
+    if (!active()) { dismissUi(DISMISS_SCOPES); return; }   // never confirm after STOP
     confirmEl.click();
 
     // Delete must prove the row is GONE: 'changed' alone can be a spinner or a
@@ -996,7 +1086,7 @@ async function processItem(item) {
       return;
     }
     // not verified
-    pressEscape();
+    dismissUi(DISMISS_SCOPES);
     const second = await waitFor(() => !itemPresent(email) ? 'removed' : null, { timeout: 2500 });
     if (second) {
       state.stats.processed++; state.progress++;
@@ -1081,7 +1171,7 @@ async function processRename(target) {
       return el && isVisible(el) ? el : null;
     }, { timeout: 5000 });
     if (!inputFound) {
-      pressEscape();
+      dismissUi(DISMISS_SCOPES);
       if (attempt === 2) return 'failed';
       addLog('warning', t('retry_note', { email: target }));
       continue;
@@ -1095,13 +1185,13 @@ async function processRename(target) {
     const cur = await waitForStableInput(getInput);
     const input = getInput();
     if (cur === null || !input) {
-      pressEscape();
+      dismissUi(DISMISS_SCOPES);
       if (attempt === 2) return 'failed';
       addLog('warning', t('retry_note', { email: target }));
       continue;
     }
     if (cur.toLowerCase() === newLabel.toLowerCase()) {
-      pressEscape();
+      dismissUi(DISMISS_SCOPES);
       return 'already';
     }
     setInputValue(input, newLabel);
@@ -1112,11 +1202,11 @@ async function processRename(target) {
       return el && isVisible(el) && !el.disabled ? el : null;
     }, { timeout: 4000 });
     if (!save) {
-      pressEscape();
+      dismissUi(DISMISS_SCOPES);
       if (attempt === 2) return 'failed';
       continue;
     }
-    if (!active()) { pressEscape(); return 'aborted'; }
+    if (!active()) { dismissUi(DISMISS_SCOPES); return 'aborted'; }
     save.click();
 
     const ok = await waitFor(() => {
@@ -1126,7 +1216,7 @@ async function processRename(target) {
     }, { timeout: 6000 });
     if (ok) return 'renamed';
 
-    pressEscape();
+    dismissUi(DISMISS_SCOPES);
     if (attempt === 2) return 'failed';
     addLog('warning', t('retry_note', { email: target }));
     await sleep(400);
@@ -1299,7 +1389,7 @@ function stopBot(byUser = true) {
     state.lastSummary = summary;
     chrome.storage.local.set({ hmeLastSummary: summary });
   }
-  pressEscape();
+  dismissUi(DISMISS_SCOPES);
   addLog('system', t('bot_stopped'));
   chrome.storage.local.get('hmeBotClaim', r => {
     if (r.hmeBotClaim && r.hmeBotClaim.key === frameKey) chrome.storage.local.set({ hmeBotClaim: null });
