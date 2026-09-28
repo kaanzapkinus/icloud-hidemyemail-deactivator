@@ -116,7 +116,7 @@
   var BATCH = 4;
   var PANEL_DELAY = 200;   // item click -> detail panel
   var COMMIT_DELAY = 300;  // confirmed action -> model commit
-  var LOAD_DELAY = 150;    // scroll near bottom -> lazy batch
+  var LOAD_DELAY = 150;    // scroll near bottom -> lazy batch (raise via __setLoadDelay for slow tests)
   var BOTTOM_THRESHOLD = 50;
 
   // ------------------------------------------------------------------ state
@@ -125,6 +125,7 @@
   var panelToken = 0;
   var confirmAction = null; // { type: 'deactivate' | 'delete', email }
   var loadTimer = null;
+  var loader = null; // visible "fetching next batch" indicator (aria-busy)
 
   window.__clicks = [];
   window.__rendered = { active: 0, inactive: 0 };
@@ -235,13 +236,29 @@
     if (changed) renderAll();
   }
 
+  // Simulates a real spinner/skeleton while the next batch is fetched
+  function showLoader() {
+    if (loader) return;
+    loader = document.createElement('div');
+    loader.className = 'hme-loading';
+    loader.setAttribute('aria-busy', 'true');
+    loader.textContent = 'Loading more…';
+    listScroll.parentNode.insertBefore(loader, listScroll);
+  }
+  function hideLoader() {
+    if (!loader) return;
+    loader.remove();
+    loader = null;
+  }
+
   listScroll.addEventListener('scroll', function () {
     if (loadTimer) return;
     var t = totals();
     if (window.__rendered.active >= t.active && window.__rendered.inactive >= t.inactive) return;
     var distance = listScroll.scrollHeight - listScroll.scrollTop - listScroll.clientHeight;
     if (distance <= BOTTOM_THRESHOLD) {
-      loadTimer = setTimeout(function () { loadTimer = null; renderMore(); }, LOAD_DELAY);
+      showLoader();
+      loadTimer = setTimeout(function () { loadTimer = null; renderMore(); hideLoader(); }, LOAD_DELAY);
     }
   });
 
@@ -410,6 +427,8 @@
     },
     clicks: window.__clicks,
     failNext: function (n) { window.__failNext = n; },
+    setLoadDelay: function (ms) { LOAD_DELAY = ms; },
+
     setLabel: function (email, label) {
       var item = findItem(email);
       if (!item) return false;

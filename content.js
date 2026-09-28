@@ -47,6 +47,9 @@ const locales = {
     rename_failed: '✗ Rename failed: {email}',
     protect_added: '🛡 Added to protection list: {n} address(es)',
     not_trained: 'Cannot start: complete training for this module first.',
+    err_selector_empty: 'List items not found at all — the trained selector may no longer match. Retrain this module.',
+    mode_rename_pick: 'Choose Deactivate or Delete in the Run tab before starting the bot.',
+    err_wrong_frame: 'Wrong frame: HME content not detected here. Reopen the extension on the Hide My Email page.',
     untrained_rename_hint: 'Rename training: 1) email item, 2) label input, 3) Save button.',
     overlay_title: 'HME Bot',
     overlay_training: 'Training',
@@ -117,6 +120,9 @@ const locales = {
     rename_failed: '✗ Yeniden adlandırma başarısız: {email}',
     protect_added: '🛡 Koruma listesine eklendi: {n} adres',
     not_trained: 'Başlatılamıyor: önce bu modülün eğitimini tamamlayın.',
+    err_selector_empty: 'Hiç liste öğesi bulunamadı — eğitilmiş seçici artık eşleşmiyor olabilir. Bu modülü yeniden eğitin.',
+    mode_rename_pick: 'Botu başlatmadan önce Çalıştır sekmesinden Devre Dışı Bırak veya Sil modülünü seçin.',
+    err_wrong_frame: 'Yanlış çerçeve: burada HME içeriği bulunamadı. Eklentiyi E-postamı Gizle sayfasında yeniden açın.',
     untrained_rename_hint: 'Yeniden adlandırma eğitimi: 1) e-posta öğesi, 2) etiket alanı, 3) Kaydet butonu.',
     overlay_title: 'HME Bot',
     overlay_training: 'Eğitim',
@@ -202,6 +208,7 @@ let botTimeoutId = null;
 let sleepResolver = null;
 let loopActive = false;
 let runFinished = true;
+let startPending = false;     // start requested while the previous loop unwinds
 let renameSearchExhausted = false;
 
 const t = (key, vars) => {
@@ -271,7 +278,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
       haltLocal();
     }
   }
-  if ('hmeProtectedEmails' in patch && state.botState === 'idle') {
+  // Protection must be updatable WHILE a delete run is in progress, otherwise
+  // the bot keeps deleting an address the user just protected. No write loop:
+  // this branch only reads, and addProtectedEmails writes only new entries.
+  if ('hmeProtectedEmails' in patch) {
     state.protectedEmails = new Set((patch.hmeProtectedEmails || []).map(normalizeEmail));
   }
   if ('hmeProtectedLabel' in patch) state.protectedLabel = patch.hmeProtectedLabel || '';
@@ -504,18 +514,41 @@ function queryEmailItems() {
 }
 
 function findScrollContainer(items) {
-  const probe = items[items.length - 1] || document.body;
+  const sel = state.selectors.email && state.selectors.email.selector;
+  const probe = (items && items[items.length - 1]) ||
+    (sel ? document.querySelector(sel) : null) || document.body;
+  // Pass 1: programmatically scrollable ancestors (auto/scroll/hidden/overlay)
   let c = probe ? probe.parentElement : null;
   while (c && c !== document.body) {
     if (c.scrollHeight > c.clientHeight + 30) {
       const ov = getComputedStyle(c).overflowY;
-      if (ov === 'auto' || ov === 'scroll') return c;
+      if (ov === 'auto' || ov === 'scroll' || ov === 'hidden' || ov === 'overlay') return c;
     }
+    c = c.parentElement;
+  }
+  // Pass 2: any scrollable ancestor (custom wheel/scrollbar implementations)
+  c = probe ? probe.parentElement : null;
+  while (c && c !== document.body) {
+    if (c.scrollHeight > c.clientHeight + 30) return c;
     c = c.parentElement;
   }
   const guess = document.querySelector('[id*="list"][style*="overflow"], [class*="scroll"], [id*="scroll"]');
   if (guess && guess.scrollHeight > guess.clientHeight + 30) return guess;
   return null; // window scroll
+}
+
+// Apple shows a spinner/skeleton while fetching the next batch; never count
+// that as "no more items".
+function isLoadingVisible(sc) {
+  try {
+    if (document.querySelector('[aria-busy="true"]')) return true;
+    const sel = '[class*="loading" i],[class*="spinner" i],[class*="skeleton" i],[role="progressbar"],[data-loading],[data-testid*="loading" i]';
+    const scope = sc || document.body;
+    for (const el of scope.querySelectorAll(sel)) {
+      if (isVisible(el)) return true;
+    }
+  } catch (e) {}
+  return false;
 }
 
 function scrollDown(sc) {
@@ -769,29 +802,44 @@ function addProtectedEmails(emails) {
 // Search (lazy-load aware, exhaustible)
 // ---------------------------------------------------------------------------
 async function scrollUntilFound(matchFn) {
-  let stall = 0, lastSig = '', scrolledOnce = false;
+  const sigOf = () => {
+    const it = queryEmailItems();
+    const sc = findScrollContainer(it);
+    return { n: it.length, sig: it.length + ':' + (sc ? sc.scrollHeight : document.documentElement.scrollHeight), sc, last: it[it.length - 1] };
+  };
+  let stall = 0, lastSig = '', scrolledOnce = false, loadingSince = 0;
   while (active()) {
-    const items = queryEmailItems();
-    const hit = items.find(matchFn);
+    const { n, sig, sc, last } = sigOf();
+    const hit = queryEmailItems().find(matchFn);
     if (hit) return hit;
-    const sc = findScrollContainer(items);
-    const sig = items.length + ':' + (sc ? sc.scrollHeight : document.documentElement.scrollHeight);
-    if (scrolledOnce && sig === lastSig) {
-      stall++;
-      if (stall >= 3) return EXHAUSTED;
-    } else { stall = 0; }
+    if (scrolledOnce && sig === lastSig) stall++; else stall = 0;
     lastSig = sig;
     if (!scrolledOnce) { addLog('info', t('scrolling')); scrolledOnce = true; }
-    scrollDown(sc);
-    const last = items[items.length - 1];
-    if (last) { try { last.scrollIntoView({ block: 'end' }); } catch (e) {} }
+    // a visible loader means "more may be coming" → wait it out, don't scroll again
+    if (isLoadingVisible(sc)) {
+      if (!loadingSince) loadingSince = performance.now();
+      if (performance.now() - loadingSince > 90000) { loadingSince = 0; stall++; }
+      else stall = 0;
+    } else {
+      loadingSince = 0;
+    }
+    if (stall >= 4) {
+      if (n === 0) addLog('error', t('err_selector_empty'));
+      return EXHAUSTED;
+    }
+    if (loadingSince) {
+      await sleep(500);
+    } else {
+      scrollDown(sc);
+      if (last) { try { last.scrollIntoView({ block: 'end' }); } catch (e) {} }
+    }
     await waitFor(() => {
       const it2 = queryEmailItems();
       const sc2 = findScrollContainer(it2);
       const sig2 = it2.length + ':' + (sc2 ? sc2.scrollHeight : document.documentElement.scrollHeight);
       return sig2 !== sig ? true : null;
-    }, { timeout: 2200 });
-    await sleep(120);
+    }, { timeout: 6000 });
+    await sleep(150);
   }
   return EXHAUSTED;
 }
@@ -907,6 +955,7 @@ async function processItem(item) {
       addLog('warning', t('err_action_missing', { email }));
       return;
     }
+    if (!active()) { pressEscape(); return; }   // user stopped mid-step
     actionEl.click();
 
     const confirmEl = await waitFor(() => {
@@ -921,10 +970,24 @@ async function processItem(item) {
       continue;
     }
     const snap = snapshotItem(freshItemNode(email) || item);
+    if (!active()) { pressEscape(); return; }   // never confirm after STOP
     confirmEl.click();
 
+    // Delete must prove the row is GONE: 'changed' alone can be a spinner or a
+    // selection class, and counting that as deleted is a silent false positive.
+    // Deactivate legitimately moves the row to the inactive section ('changed').
     const verdict = await verifyProcessed(email, snap);
-    if (verdict) {
+    const ok = state.mode === 'delete' ? verdict === 'removed' : !!verdict;
+    if (ok) {
+      state.skipSet.add(email);                  // never click a processed address again
+      if (state.mode === 'delete' && isProtectedEmail(item)) {
+        // became protected while this item was being processed: it survived,
+        // so report it as skipped rather than deleted.
+        countSkipOnce('skippedProtected', email, 'skip_protected');
+        state.progress++;
+        broadcastState();
+        return;
+      }
       state.stats.processed++;
       if (secSel) state.matchSels.add(secSel);
       state.progress++;
@@ -979,6 +1042,7 @@ async function runLoop() {
     }
   } finally {
     loopActive = false;
+    if (startPending) { startPending = false; if (running()) (state.mode === 'rename' ? runRenameLoop() : runLoop()); }
   }
 }
 
@@ -991,7 +1055,14 @@ async function processRename(target) {
     if (!active()) return 'aborted';
     let item = null;
     if (renameSearchExhausted) {
+      // The list was scrolled end-to-end for a previous target, but a
+      // re-sort or lazy batch may have changed what is rendered: still look at
+      // the DOM, and allow a full re-scan if the item isn't there.
       item = queryEmailItems().find(x => extractEmail(x) === target) || null;
+      if (!item) {
+        const found = await findTargetItem(target);
+        if (found !== EXHAUSTED) item = found;
+      }
     } else {
       const found = await findTargetItem(target);
       if (found === EXHAUSTED) { renameSearchExhausted = true; item = null; }
@@ -1045,6 +1116,7 @@ async function processRename(target) {
       if (attempt === 2) return 'failed';
       continue;
     }
+    if (!active()) { pressEscape(); return 'aborted'; }
     save.click();
 
     const ok = await waitFor(() => {
@@ -1108,6 +1180,7 @@ async function runRenameLoop() {
     if (active()) finishRun('goal');
   } finally {
     loopActive = false;
+    if (startPending) { startPending = false; if (running()) (state.mode === 'rename' ? runRenameLoop() : runLoop()); }
     if (renamedForProtection.length && state.autoProtect) addProtectedEmails(renamedForProtection);
   }
 }
@@ -1156,9 +1229,15 @@ function haltLocal() {
   broadcastState();
 }
 
-function startBot(limit, delay, jitter) {
+function startBot(limit, delay, jitter, mode) {
+  // Run mode is explicit: after a rename run state.mode is 'rename' in content.
+  if (mode && TRAINING_STEPS[mode] && mode !== 'rename') {
+    state.mode = mode;
+    state.selectors = { ...state.selectors, ...(state.cachedSelectors[mode] || {}) };
+  }
+  if (state.mode === 'rename') { addLog('error', t('mode_rename_pick')); broadcastState(); return false; }
   if (!isTrained(state.mode)) { addLog('error', t('not_trained')); broadcastState(); return false; }
-  if (!isCapableFrame()) { addLog('error', 'Wrong frame: HME content not detected here.'); broadcastState(); return false; }
+  if (!isCapableFrame()) { addLog('error', t('err_wrong_frame')); broadcastState(); return false; }
   createOverlay();
   resetRunState();
   state.botState = 'running';
@@ -1168,13 +1247,14 @@ function startBot(limit, delay, jitter) {
   chrome.storage.local.set({ hmeBotClaim: { key: frameKey, ts: Date.now() } });
   addLog('info', t('bot_started', { mod: t('mod_' + state.mode), limit: state.limit, delay: state.delay }));
   updateOverlay(); broadcastState();
-  runLoop();
+  if (loopActive) { startPending = true; }   // previous loop still unwinding
+  else runLoop();
   return true;
 }
 
 function startRename(targets, label, delay) {
   if (!isTrained('rename')) { addLog('error', t('not_trained') + ' ' + t('untrained_rename_hint')); broadcastState(); return false; }
-  if (!isCapableFrame()) { addLog('error', 'Wrong frame: HME content not detected here.'); broadcastState(); return false; }
+  if (!isCapableFrame()) { addLog('error', t('err_wrong_frame')); broadcastState(); return false; }
   if (!Array.isArray(targets) || !targets.length || !label || !label.trim()) {
     addLog('error', 'Rename: empty target list or label.'); broadcastState(); return false;
   }
@@ -1190,7 +1270,7 @@ function startRename(targets, label, delay) {
   chrome.storage.local.set({ hmeBotClaim: { key: frameKey, ts: Date.now() } });
   addLog('info', t('rename_started', { n: state.renameTargets.length, label: state.renameLabel }));
   updateOverlay(); broadcastState();
-  runRenameLoop();
+  if (loopActive) { startPending = true; } else runRenameLoop();
   return true;
 }
 
@@ -1405,7 +1485,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       break;
     case 'START_BOT':
       if (!req.targeted && !isCapableFrame()) { sendResponse({ status: 'wrong_frame' }); break; }
-      sendResponse({ status: startBot(req.limit, req.delay, req.jitter) ? 'ok' : 'error', state: publicState() });
+      sendResponse({ status: startBot(req.limit, req.delay, req.jitter, req.mode) ? 'ok' : 'error', state: publicState() });
       break;
     case 'START_RENAME':
       if (!req.targeted && !isCapableFrame()) { sendResponse({ status: 'wrong_frame' }); break; }

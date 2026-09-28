@@ -122,6 +122,8 @@ const frames = new Map();      // frameId -> capability
 let lastState = null;
 let connected = false;
 let currentMode = 'deactivate';
+const LOG_CAP = 200; // keep in sync with content.js publicState() log slice
+let protectedCacheInit = false;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -161,7 +163,10 @@ function init() {
 
   // ---- run controls
   $('btnStartBot').addEventListener('click', () => {
+    // Mode is sent explicitly: after a rename run the content-side mode may
+    // still be 'rename' and must not be used for deactivate/delete.
     sendAction('START_BOT', {
+      mode: currentMode,
       limit: parseInt($('inputLimit').value) || 50,
       delay: parseInt($('inputDelay').value) || 1500,
       jitter: $('chkJitter').checked
@@ -269,7 +274,8 @@ function init() {
     applyI18n();
     syncSegs();
     renderParseInfo();
-    renderProtList(result.hmeProtectedEmails || []);
+    protectedCache = result.hmeProtectedEmails || [];
+    renderProtList(protectedCache);
     connect();
   });
 }
@@ -289,9 +295,15 @@ async function connect() {
   connected = false;
   setConn('search', t('conn_searching'));
   updateUI(null);
+  // Re-ask the active tab: the user may have switched tabs since popup open,
+  // or the HME page may have reloaded in the SAME tab (new frame ids).
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
-  if (!tab) { setConn('off', t('conn_offline')); return; }
+  if (!tab) { setConn('off', t('conn_offline')); updateUI(null); return; }
+  if (activeTabId !== null && tab.id !== activeTabId) {
+    sendAction('STOP_BOT');
+    sendAction('PAUSE_BOT');
+  }
   activeTabId = tab.id;
   // Broadcast ping to every frame; frames answer via runtime FRAME_HELLO (carries frameId)
   try {
@@ -302,13 +314,33 @@ async function connect() {
   setTimeout(() => { if (targetFrameId === null && !frames.size) { setConn('off', t('conn_offline')); updateUI(null); } }, 1500);
 }
 
+// Tab/frame changes must not leave the popup bound to a dead tab.
+let popupHiddenAt = 0;
+function popupVisible() {
+  if (document.visibilityState === 'visible') return true;
+  // popups can report hidden right after open; treat sub-2s as visible
+  return (Date.now() - popupHiddenAt) < 2000;
+}
+chrome.tabs.onActivated.addListener(() => { if (popupVisible()) connect(); });
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'complete' && tabId === activeTabId && popupVisible()) connect();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') popupHiddenAt = Date.now();
+  else if (Date.now() - popupHiddenAt >= 2000) connect();
+});
+
 function selectTarget() {
   if (!frames.size) { setConn('off', t('conn_offline')); updateUI(null); return; }
+  // Only frames that actually look like the HME app are eligible; otherwise a
+  // random frame (iCloud home, Mail) could be targeted and "trained" on.
   let best = null, bestScore = -1;
   for (const [fid, cap] of frames) {
+    if (!cap.hasHme && cap.matchCount <= 0) continue;
     const score = cap.matchCount * 1000 + (cap.hasHme ? 100 : 0) + (cap.isTop ? 0 : 1);
     if (score > bestScore) { bestScore = score; best = fid; }
   }
+  if (best === null) { setConn('off', t('conn_offline')); updateUI(null); return; }
   targetFrameId = best;
   for (const fid of frames.keys()) {
     if (fid !== best) sendRaw(fid, { action: 'SET_TARGET', isTarget: false, targeted: true });
@@ -494,11 +526,12 @@ function updateUI(st) {
   if (document.activeElement !== $('chkAutoProtect')) $('chkAutoProtect').checked = st.autoProtect !== false;
   renderProtList(st.protectedEmails || []);
 
-  // logs full sync when counts diverge (e.g. popup reopened)
+  // Full rebuild only when the content-side buffer really differs from what's on screen.
+  // Both sides cap at LOG_CAP; a mismatch after streaming appendLog() means a new session.
   const consoleEl = $('logConsole');
   if (st.logs && consoleEl.childElementCount !== st.logs.length) {
     consoleEl.innerHTML = '';
-    for (const entry of st.logs.slice(-200)) appendLog(entry, true);
+    for (const entry of st.logs.slice(-LOG_CAP)) appendLog(entry, true);
     consoleEl.scrollTop = consoleEl.scrollHeight;
   }
 
@@ -534,6 +567,8 @@ function renderResults(results) {
   const entries = Object.entries(results || {});
   box.classList.toggle('hidden', entries.length === 0);
   const icons = { renamed: '✓', already: '⚠', notFound: '?', failed: '✗' };
+  // content returns camelCase statuses; locale keys are snake_case
+  const statusKey = s => (s === 'notFound' ? 'not_found' : s);
   box.innerHTML = '';
   for (const [email, status] of entries) {
     const row = document.createElement('div');
@@ -546,7 +581,7 @@ function renderResults(results) {
     mail.textContent = email;
     const stt = document.createElement('span');
     stt.className = 'st';
-    stt.textContent = t('res_' + status) || status;
+    stt.textContent = t('res_' + statusKey(status)) || status;
     row.append(ico, mail, stt);
     box.appendChild(row);
   }
@@ -589,12 +624,16 @@ function renderProtList(list) {
   }
 }
 
+// Storage is the source of truth: lastState can be null (popup just opened) or
+// stale, and a merge based on it would WIPE previously protected addresses.
+let protectedCache = [];
 function getProtected() {
-  if (lastState && Array.isArray(lastState.protectedEmails)) return lastState.protectedEmails;
-  return [];
+  if (lastState && Array.isArray(lastState.protectedEmails)) protectedCache = lastState.protectedEmails;
+  return protectedCache;
 }
 function applyProtected(list) {
   const clean = [...new Set(list.map(e => e.trim().toLowerCase()).filter(Boolean))];
+  protectedCache = clean;
   chrome.storage.local.set({ hmeProtectedEmails: clean });
   if (lastState) lastState.protectedEmails = clean;
   renderProtList(clean);
@@ -630,6 +669,6 @@ function appendLog(entry, silent) {
   div.className = 'log-entry ' + (entry.type || 'system');
   div.textContent = entry.text;
   consoleEl.appendChild(div);
-  while (consoleEl.childElementCount > 300) consoleEl.removeChild(consoleEl.firstChild);
+  while (consoleEl.childElementCount > LOG_CAP) consoleEl.removeChild(consoleEl.firstChild);
   if (!silent) consoleEl.scrollTop = consoleEl.scrollHeight;
 }
