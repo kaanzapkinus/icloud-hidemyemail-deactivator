@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "iCloud Hide My Email Bulk Deactivator",
-  "version": "1.0",
-  "description": "Automate deactivating multiple Hide My Email addresses on iCloud.com using a trainable bot.",
+  "version": "2.0",
+  "description": "Trainable bot: bulk deactivate, permanently delete, and bulk-rename (label) iCloud Hide My Email addresses, with a never-delete protection list.",
   "permissions": [
     "activeTab",
     "storage"
@@ -11,7 +11,13 @@
     "https://*.icloud.com/*"
   ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "HME Bot"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "content_scripts": [
     {

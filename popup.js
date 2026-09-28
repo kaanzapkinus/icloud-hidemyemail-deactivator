@@ -1,420 +1,635 @@
-// popup.js - Coordinating popup UI with injected content script
+// popup.js — HME Bot control panel (frame-aware, v2)
+'use strict';
 
+// ---------------------------------------------------------------------------
+// i18n
+// ---------------------------------------------------------------------------
 const locales = {
   en: {
-    status_idle: "Idle",
-    status_training: "Training",
-    status_running: "Running",
-    status_paused: "Paused",
-    status_offline: "Offline",
-    status_ready: "Ready",
-    status_untrained: "Untrained",
-    title_setup: "1. Training Mode (Setup)",
-    desc_setup: "Start training to teach the bot which elements to click in the iCloud UI.",
-    btn_start_training: "Start Training",
-    btn_reset_training: "Reset",
-    badge_configured: "Configured",
-    badge_waiting: "Waiting...",
-    badge_not_configured: "Not Set",
-    email_label: "Email Element",
-    deactivate_btn_label: "Deactivate Button",
-    delete_btn_label: "Delete Button",
-    confirm_btn_label: "Confirm Button",
-    title_panel: "2. Bot Control Panel",
-    label_module: "Active Module",
-    label_delay: "Delay (ms)",
-    label_limit: "Limit (Count)",
-    label_flags: "Skipped Emails (Blacklist Keywords)",
-    btn_start_bot: "Start Bot",
-    btn_pause_bot: "Pause",
-    btn_stop_bot: "Stop",
-    title_logs: "Process Logs",
-    btn_clear_logs: "Clear",
-    footer_text: "iCloud.com/icloudplus page must be active.",
-    confirm_reset: "Are you sure you want to clear selector data for this module?",
-    confirm_clear_logs: "Logs cleared."
+    conn_searching: 'Searching for iCloud HME frame…',
+    conn_connected: 'Connected — {mod} module · frame #{frame}',
+    conn_offline: 'No iCloud HME frame found. Open icloud.com → Hide My Email.',
+    btn_reconnect: 'Reconnect',
+    tab_run: 'Run', tab_training: 'Training', tab_rename: 'Rename', tab_protect: 'Protection', tab_logs: 'Logs',
+    label_module: 'Module',
+    mode_deactivate: 'Deactivate', mode_delete: 'Delete', mode_rename: 'Rename',
+    label_delay: 'Delay (ms)', label_limit: 'Limit (count)',
+    label_jitter: 'Human-like delay variation (±30%)',
+    label_flags: 'Blacklist keywords (comma separated)',
+    protect_note: 'Protected addresses skipped in Delete mode:',
+    btn_start_bot: 'Start Bot', btn_pause: 'Pause', btn_resume: 'Resume', btn_stop: 'Stop',
+    training_desc: 'Teach the bot which elements to click. Training is saved per module and survives page reloads.',
+    training_hint: 'Start training, then click the 3 elements on the iCloud page, in order.',
+    btn_start_training: 'Start Training', btn_reset: 'Reset',
+    step_email: 'Email item in the list',
+    step_action_deactivate: '"Deactivate" button',
+    step_action_delete: '"Delete" button',
+    step_confirm: 'Confirm button in the dialog',
+    step_label_input: 'Label input field',
+    step_save: '"Save changes" button',
+    badge_set: 'Set', badge_waiting: 'Click it…', badge_unset: 'Not set',
+    rename_desc: 'Paste addresses (one per line). The bot finds each one in the active + inactive lists and sets its label. Requires Rename training.',
+    label_targets: 'Email list', label_new_label: 'New label',
+    label_auto_protect: 'Automatically add renamed addresses to the protection list',
+    btn_start_rename: 'Start Rename',
+    parse_valid: '{valid} valid address(es)', parse_ignored: '{n} line(s) ignored',
+    res_renamed: 'renamed', res_already: 'already set', res_not_found: 'not found', res_failed: 'failed',
+    protect_desc: 'Protected addresses are never clicked during a Delete run. Protection uses both the exact address list and the protected label (double safety).',
+    label_protected_label: 'Protected label',
+    label_add_emails: 'Add addresses (one per line)',
+    btn_add: 'Add', btn_copy_list: 'Copy list', btn_clear_list: 'Clear list',
+    label_protected_list: 'Protected addresses',
+    prot_empty: 'List is empty. Add addresses manually or via the Rename tab.',
+    title_logs: 'Process logs', btn_clear: 'Clear',
+    footer_text: 'The iCloud.com → Hide My Email page must be open.',
+    status_offline: 'Offline', status_ready: 'Ready', status_untrained: 'Untrained',
+    status_training: 'Training', status_running: 'Running', status_paused: 'Paused',
+    confirm_reset: 'Clear training data for this module?',
+    confirm_clear_prot: 'Remove ALL addresses from the protection list?',
+    copied: 'Copied ✓',
+    summary_title: 'Last run',
+    reason_goal: 'goal reached', reason_exhausted: 'list exhausted', reason_stopped: 'stopped',
+    current_prefix: 'Current:'
   },
   tr: {
-    status_idle: "Boşta",
-    status_training: "Eğitimde",
-    status_running: "Çalışıyor",
-    status_paused: "Duraklatıldı",
-    status_offline: "Çevrimdışı",
-    status_ready: "Hazır",
-    status_untrained: "Eğitilmedi",
-    title_setup: "1. Eğitim Modu (Setup)",
-    desc_setup: "iCloud arayüzündeki öğeleri bota öğretmek için eğitimi başlatın.",
-    btn_start_training: "Eğitimi Başlat",
-    btn_reset_training: "Sıfırla",
-    badge_configured: "Tanımlandı",
-    badge_waiting: "Bekleniyor...",
-    badge_not_configured: "Seçilmedi",
-    email_label: "E-posta Ögesi",
-    deactivate_btn_label: "Devre Dışı Bırak Butonu",
-    delete_btn_label: "Sil Butonu",
-    confirm_btn_label: "Onay Butonu",
-    title_panel: "2. Bot Kontrol Paneli",
-    label_module: "Çalışma Modülü",
-    label_delay: "Gecikme (ms)",
-    label_limit: "Limit (Adet)",
-    label_flags: "Atlanacak E-postalar (Kara Liste Kelimeleri)",
-    btn_start_bot: "Botu Başlat",
-    btn_pause_bot: "Duraklat",
-    btn_stop_bot: "Durdur",
-    title_logs: "İşlem Günlüğü (Logs)",
-    btn_clear_logs: "Temizle",
-    footer_text: "iCloud.com/icloudplus sayfasında açık olmalıdır.",
-    confirm_reset: "Seçilen modüle ait eğitim verilerini sıfırlamak istediğinize emin misiniz?",
-    confirm_clear_logs: "Günlük temizlendi."
+    conn_searching: 'iCloud HME çerçevesi aranıyor…',
+    conn_connected: 'Bağlı — {mod} modülü · çerçeve #{frame}',
+    conn_offline: 'iCloud HME çerçevesi bulunamadı. icloud.com → E-postamı Gizle sayfasını açın.',
+    btn_reconnect: 'Yeniden bağlan',
+    tab_run: 'Çalıştır', tab_training: 'Eğitim', tab_rename: 'Yeniden Adlandır', tab_protect: 'Koruma', tab_logs: 'Günlük',
+    label_module: 'Modül',
+    mode_deactivate: 'Devre Dışı Bırak', mode_delete: 'Kalıcı Sil', mode_rename: 'Yeniden Adlandır',
+    label_delay: 'Gecikme (ms)', label_limit: 'Limit (adet)',
+    label_jitter: 'İnsansı gecikme varyasyonu (±%30)',
+    label_flags: 'Kara liste kelimeleri (virgülle ayırın)',
+    protect_note: 'Silme modunda atlanan korumalı adresler:',
+    btn_start_bot: 'Botu Başlat', btn_pause: 'Duraklat', btn_resume: 'Devam', btn_stop: 'Durdur',
+    training_desc: 'Bota hangi öğelere tıklaması gerektiğini öğretin. Eğitim modül bazında kaydedilir, sayfa yenilense de korunur.',
+    training_hint: 'Eğitimi başlatın, ardından iCloud sayfasındaki 3 öğeye sırayla tıklayın.',
+    btn_start_training: 'Eğitimi Başlat', btn_reset: 'Sıfırla',
+    step_email: 'Listedeki e-posta öğesi',
+    step_action_deactivate: '"Devre Dışı Bırak" butonu',
+    step_action_delete: '"Sil" butonu',
+    step_confirm: 'Onay penceresindeki buton',
+    step_label_input: 'Etiket (Label) giriş alanı',
+    step_save: '"Değişiklikleri Kaydet" butonu',
+    badge_set: 'Tanımlı', badge_waiting: 'Tıklayın…', badge_unset: 'Tanımsız',
+    rename_desc: 'Adresleri alt alta yapıştırın. Bot her birini aktif + pasif listelerde bulur ve etiketini değiştirir. Yeniden Adlandırma eğitimi gerekir.',
+    label_targets: 'E-posta listesi', label_new_label: 'Yeni etiket',
+    label_auto_protect: 'Yeniden adlandırılan adresleri otomatik olarak koruma listesine ekle',
+    btn_start_rename: 'Yeniden Adlandırmayı Başlat',
+    parse_valid: '{valid} geçerli adres', parse_ignored: '{n} satır yoksayıldı',
+    res_renamed: 'yeniden adlandırıldı', res_already: 'zaten bu etikette', res_not_found: 'bulunamadı', res_failed: 'başarısız',
+    protect_desc: 'Korumalı adreslere Silme taramasında asla tıklanmaz. Koruma hem tam adres listesi hem korumalı etiket ile çalışır (çift emniyet).',
+    label_protected_label: 'Korumalı etiket',
+    label_add_emails: 'Adres ekle (satır başına bir tane)',
+    btn_add: 'Ekle', btn_copy_list: 'Listeyi kopyala', btn_clear_list: 'Listeyi temizle',
+    label_protected_list: 'Korumalı adresler',
+    prot_empty: 'Liste boş. Elle ekleyin veya Yeniden Adlandır sekmesini kullanın.',
+    title_logs: 'İşlem günlüğü', btn_clear: 'Temizle',
+    footer_text: 'iCloud.com → E-postamı Gizle sayfası açık olmalıdır.',
+    status_offline: 'Çevrimdışı', status_ready: 'Hazır', status_untrained: 'Eğitilmedi',
+    status_training: 'Eğitimde', status_running: 'Çalışıyor', status_paused: 'Duraklatıldı',
+    confirm_reset: 'Bu modülün eğitim verileri silinsin mi?',
+    confirm_clear_prot: 'TÜM adresler koruma listesinden kaldırılsın mı?',
+    copied: 'Kopyalandı ✓',
+    summary_title: 'Son çalıştırma',
+    reason_goal: 'hedefe ulaşıldı', reason_exhausted: 'liste tükendi', reason_stopped: 'durduruldu',
+    current_prefix: 'Şu an:'
   }
 };
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Elements
-  const btnLangEN = document.getElementById('btnLangEN');
-  const btnLangTR = document.getElementById('btnLangTR');
-  const selectMode = document.getElementById('selectMode');
-  const inputFlags = document.getElementById('inputFlags');
-  const inputDelay = document.getElementById('inputDelay');
-  const inputLimit = document.getElementById('inputLimit');
-  
-  const btnStartTraining = document.getElementById('btnStartTraining');
-  const btnResetTraining = document.getElementById('btnResetTraining');
-  
-  const selEmail = document.getElementById('selEmail');
-  const selDeactivate = document.getElementById('selDeactivate');
-  const selConfirm = document.getElementById('selConfirm');
-  
-  const badgeEmail = document.getElementById('badgeEmail');
-  const badgeDeactivate = document.getElementById('badgeDeactivate');
-  const badgeConfirm = document.getElementById('badgeConfirm');
-  
-  const btnStartBot = document.getElementById('btnStartBot');
-  const btnPauseBot = document.getElementById('btnPauseBot');
-  const btnStopBot = document.getElementById('btnStopBot');
-  
-  const progressContainer = document.getElementById('progressContainer');
-  const progressText = document.getElementById('progressText');
-  const progressBarFill = document.getElementById('progressBarFill');
-  const progressPercent = document.getElementById('progressPercent');
-  
-  const logConsole = document.getElementById('logConsole');
-  const btnClearLogs = document.getElementById('btnClearLogs');
-  const botStatusBadge = document.getElementById('botStatusBadge');
+let currentLang = 'en';
+const t = (key, vars) => {
+  let s = (locales[currentLang] && locales[currentLang][key]) || locales.en[key] || key;
+  if (vars) for (const k of Object.keys(vars)) s = s.replaceAll('{' + k + '}', vars[k]);
+  return s;
+};
 
-  let currentLang = 'en';
+const STEP_KEYS = {
+  deactivate: ['email', 'deactivate', 'confirm'],
+  delete: ['email', 'deactivate', 'confirm'],
+  rename: ['email', 'labelInput', 'save']
+};
+const EMAIL_LINE_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
-  // Load cached settings from storage
-  chrome.storage.local.get(['hmeFlaggedWords', 'hmeLastMode', 'hmeDelay', 'hmeLimit', 'hmeLang'], (result) => {
-    if (result.hmeFlaggedWords) inputFlags.value = result.hmeFlaggedWords;
-    if (result.hmeLastMode) selectMode.value = result.hmeLastMode;
-    if (result.hmeDelay) inputDelay.value = result.hmeDelay;
-    if (result.hmeLimit) inputLimit.value = result.hmeLimit;
-    
-    currentLang = result.hmeLang || 'en';
-    translateUI(currentLang);
+// ---------------------------------------------------------------------------
+// Runtime state
+// ---------------------------------------------------------------------------
+let activeTabId = null;
+let targetFrameId = null;
+const frames = new Map();      // frameId -> capability
+let lastState = null;
+let connected = false;
+let currentMode = 'deactivate';
+
+document.addEventListener('DOMContentLoaded', init);
+
+function $(id) { return document.getElementById(id); }
+
+function init() {
+  // ---- tabs
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Dynamic Translate UI Texts
-  function translateUI(lang) {
-    currentLang = lang;
-    const t = locales[lang];
-    
-    // Language buttons active class toggle
-    if (lang === 'en') {
-      btnLangEN.classList.add('active');
-      btnLangTR.classList.remove('active');
-    } else {
-      btnLangEN.classList.remove('active');
-      btnLangTR.classList.add('active');
-    }
-    
-    // Labels & Text nodes
-    document.querySelector('.card:nth-of-type(2) h2').textContent = t.title_setup;
-    document.querySelector('.card:nth-of-type(2) .card-desc').textContent = t.desc_setup;
-    btnResetTraining.textContent = t.btn_reset_training;
-    
-    document.querySelector('#selEmail .label').textContent = t.email_label;
-    document.querySelector('#selConfirm .label').textContent = t.confirm_btn_label;
-    
-    document.querySelector('.card:nth-of-type(3) h2').textContent = t.title_panel;
-    document.querySelector('label[for="selectMode"]').textContent = t.label_module;
-    document.querySelector('label[for="inputDelay"]').textContent = t.label_delay;
-    document.querySelector('label[for="inputLimit"]').textContent = t.label_limit;
-    document.querySelector('label[for="inputFlags"]').textContent = t.label_flags;
-    
-    btnPauseBot.textContent = t.btn_pause_bot;
-    btnStopBot.textContent = t.btn_stop_bot;
-    
-    document.querySelector('.log-card h2').textContent = t.title_logs;
-    btnClearLogs.textContent = t.btn_clear_logs;
-    document.querySelector('.app-footer span').textContent = t.footer_text;
-    
-    // Update select option translations
-    selectMode.options[0].text = lang === 'en' ? "Deactivate (Active ➔ Inactive)" : "Devre Dışı Bırak (Aktif ➔ Pasif)";
-    selectMode.options[1].text = lang === 'en' ? "Permanently Delete (Inactive ➔ Delete)" : "Kalıcı Olarak Sil (Pasif ➔ Sil)";
-    
-    // Refresh status panel UI text values
-    syncState();
-  }
+  // ---- language
+  $('btnLangEN').addEventListener('click', () => setLang('en'));
+  $('btnLangTR').addEventListener('click', () => setLang('tr'));
 
-  // Language buttons change listeners
-  btnLangEN.addEventListener('click', () => {
-    chrome.storage.local.set({ hmeLang: 'en' });
-    translateUI('en');
-    sendAction('SET_LANG', { lang: 'en' });
+  // ---- mode segments
+  document.querySelectorAll('#modeSeg button, #trainModeSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode;
+      chrome.storage.local.set({ hmeLastMode: mode });
+      sendAction('SET_MODE', { mode });
+      currentMode = mode;
+      syncSegs();
+      if (lastState) renderSteps({ ...lastState, mode });
+      refreshButtons();
+    });
   });
 
-  btnLangTR.addEventListener('click', () => {
-    chrome.storage.local.set({ hmeLang: 'tr' });
-    translateUI('tr');
-    sendAction('SET_LANG', { lang: 'tr' });
+  // ---- settings persistence
+  $('inputDelay').addEventListener('change', () => chrome.storage.local.set({ hmeDelay: $('inputDelay').value }));
+  $('inputLimit').addEventListener('change', () => chrome.storage.local.set({ hmeLimit: $('inputLimit').value }));
+  $('chkJitter').addEventListener('change', () => chrome.storage.local.set({ hmeJitter: $('chkJitter').checked }));
+  $('inputFlags').addEventListener('input', () => {
+    chrome.storage.local.set({ hmeFlaggedWords: $('inputFlags').value });
+    sendAction('UPDATE_SETTINGS', { flaggedWords: $('inputFlags').value });
   });
 
-  // Save changes to storage
-  inputFlags.addEventListener('input', () => {
-    chrome.storage.local.set({ hmeFlaggedWords: inputFlags.value });
-    sendAction('UPDATE_SETTINGS', { flaggedWords: inputFlags.value });
+  // ---- run controls
+  $('btnStartBot').addEventListener('click', () => {
+    sendAction('START_BOT', {
+      limit: parseInt($('inputLimit').value) || 50,
+      delay: parseInt($('inputDelay').value) || 1500,
+      jitter: $('chkJitter').checked
+    });
+  });
+  $('btnPauseBot').addEventListener('click', () => {
+    if (lastState && lastState.botState === 'paused') sendAction('RESUME_BOT');
+    else sendAction('PAUSE_BOT');
+  });
+  $('btnStopBot').addEventListener('click', () => sendAction('STOP_BOT'));
+
+  // ---- training
+  $('btnStartTraining').addEventListener('click', () => sendAction('START_TRAINING'));
+  $('btnResetTraining').addEventListener('click', () => {
+    if (confirm(t('confirm_reset'))) sendAction('RESET_TRAINING');
   });
 
-  selectMode.addEventListener('change', () => {
-    chrome.storage.local.set({ hmeLastMode: selectMode.value });
-    sendAction('SET_MODE', { mode: selectMode.value });
+  // ---- rename
+  $('txtTargets').addEventListener('input', () => {
+    chrome.storage.local.set({ hmeRenameTargets: $('txtTargets').value });
+    renderParseInfo();
+    refreshButtons();
   });
-
-  inputDelay.addEventListener('change', () => {
-    chrome.storage.local.set({ hmeDelay: inputDelay.value });
+  $('inputNewLabel').addEventListener('input', () => {
+    chrome.storage.local.set({ hmeRenameLabel: $('inputNewLabel').value });
+    refreshButtons();
   });
-
-  inputLimit.addEventListener('change', () => {
-    chrome.storage.local.set({ hmeLimit: inputLimit.value });
+  $('chkAutoProtect').addEventListener('change', () => {
+    chrome.storage.local.set({ hmeAutoProtect: $('chkAutoProtect').checked });
+    sendAction('UPDATE_SETTINGS', { autoProtect: $('chkAutoProtect').checked });
   });
+  $('btnStartRename').addEventListener('click', () => {
+    const { valid } = parseEmailList($('txtTargets').value);
+    const label = $('inputNewLabel').value.trim();
+    if (!valid.length || !label) return;
+    sendAction('START_RENAME', { targets: valid, label, delay: parseInt($('inputDelay').value) || 1500 });
+    switchTab('rename');
+  });
+  $('btnStopRename').addEventListener('click', () => sendAction('STOP_BOT'));
 
-  // Helper: Get active tab
-  async function getActiveTab() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tabs[0];
-  }
-
-  // Helper: Append log to console locally
-  function addLogToConsole(type, text) {
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    entry.textContent = text;
-    logConsole.appendChild(entry);
-    logConsole.scrollTop = logConsole.scrollHeight;
-  }
-
-  // Synchronize state with Content Script
-  async function syncState() {
-    const tab = await getActiveTab();
-    if (!tab) return;
-    
-    if (!tab.url || !tab.url.includes('icloud.com')) {
-      addLogToConsole('error', currentLang === 'en' ? 'Please open iCloud.com/icloudplus page.' : 'Lütfen iCloud.com/icloudplus sayfasını açın.');
-      disableAllControls();
-      return;
-    }
-
+  // ---- protection
+  $('inputProtLabel').addEventListener('input', () => {
+    chrome.storage.local.set({ hmeProtectedLabel: $('inputProtLabel').value });
+    sendAction('SET_PROTECTED', { label: $('inputProtLabel').value });
+  });
+  $('btnProtAdd').addEventListener('click', () => {
+    const { valid } = parseEmailList($('txtProtAdd').value);
+    if (!valid.length) return;
+    const merged = [...new Set([...getProtected(), ...valid])];
+    applyProtected(merged);
+    $('txtProtAdd').value = '';
+  });
+  $('btnProtCopy').addEventListener('click', async e => {
     try {
-      chrome.tabs.sendMessage(tab.id, { action: 'GET_STATE' }, (response) => {
-        if (chrome.runtime.lastError) {
-          return;
-        }
-        if (response) {
-          // If content script has a different mode, align popup mode selector
-          if (response.mode) {
-            selectMode.value = response.mode;
-            chrome.storage.local.set({ hmeLastMode: response.mode });
-          }
-          // Set initial settings to content script
-          sendAction('UPDATE_SETTINGS', { flaggedWords: inputFlags.value });
-          sendAction('SET_LANG', { lang: currentLang });
-          updateUI(response);
-        }
-      });
-    } catch (err) {
-      console.error(err);
+      await navigator.clipboard.writeText(getProtected().join('\n'));
+      const b = e.currentTarget;
+      const old = b.textContent;
+      b.textContent = t('copied');
+      setTimeout(() => { b.textContent = old; }, 1200);
+    } catch (err) {}
+  });
+  $('btnProtClear').addEventListener('click', () => {
+    if (confirm(t('confirm_clear_prot'))) applyProtected([]);
+  });
+
+  // ---- logs
+  $('btnClearLogs').addEventListener('click', () => {
+    $('logConsole').innerHTML = '';
+    sendAction('CLEAR_LOGS');
+  });
+
+  $('btnReconnect').addEventListener('click', () => connect());
+
+  // ---- incoming messages from content scripts
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    if (!msg || !msg.action) return;
+    if (msg.action === 'FRAME_HELLO') {
+      if (sender.tab && activeTabId !== null && sender.tab.id !== activeTabId) return;
+      frames.set(sender.frameId ?? 0, { isTop: !!msg.isTop, hasHme: !!msg.hasHme, matchCount: msg.matchCount || 0 });
+      if (targetFrameId === null) scheduleSelect();
+    } else if (msg.action === 'STATE_UPDATE' && sender.frameId === targetFrameId) {
+      updateUI(msg.state);
+    } else if (msg.action === 'LOG_UPDATE' && sender.frameId === targetFrameId) {
+      appendLog(msg.entry);
+      flashTab('logs');
     }
+  });
+
+  // ---- load settings, then connect
+  chrome.storage.local.get([
+    'hmeLang', 'hmeLastMode', 'hmeDelay', 'hmeLimit', 'hmeJitter', 'hmeFlaggedWords',
+    'hmeProtectedEmails', 'hmeProtectedLabel', 'hmeAutoProtect', 'hmeRenameTargets', 'hmeRenameLabel'
+  ], result => {
+    currentLang = result.hmeLang || 'en';
+    if (result.hmeLastMode) currentMode = result.hmeLastMode;
+    if (result.hmeDelay) $('inputDelay').value = result.hmeDelay;
+    if (result.hmeLimit) $('inputLimit').value = result.hmeLimit;
+    $('chkJitter').checked = !!result.hmeJitter;
+    if (result.hmeFlaggedWords) $('inputFlags').value = result.hmeFlaggedWords;
+    if (result.hmeProtectedLabel) $('inputProtLabel').value = result.hmeProtectedLabel;
+    $('chkAutoProtect').checked = result.hmeAutoProtect === undefined ? true : !!result.hmeAutoProtect;
+    if (result.hmeRenameTargets) $('txtTargets').value = result.hmeRenameTargets;
+    if (result.hmeRenameLabel) $('inputNewLabel').value = result.hmeRenameLabel;
+
+    applyI18n();
+    syncSegs();
+    renderParseInfo();
+    renderProtList(result.hmeProtectedEmails || []);
+    connect();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Connection / frame targeting
+// ---------------------------------------------------------------------------
+let selectTimer = null;
+function scheduleSelect() {
+  if (selectTimer) return;
+  selectTimer = setTimeout(() => { selectTimer = null; selectTarget(); }, 650);
+}
+
+async function connect() {
+  frames.clear();
+  targetFrameId = null;
+  connected = false;
+  setConn('search', t('conn_searching'));
+  updateUI(null);
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab) { setConn('off', t('conn_offline')); return; }
+  activeTabId = tab.id;
+  // Broadcast ping to every frame; frames answer via runtime FRAME_HELLO (carries frameId)
+  try {
+    chrome.tabs.sendMessage(tab.id, { action: 'HME_PING' }, () => void chrome.runtime.lastError);
+  } catch (e) {}
+  scheduleSelect();
+  // Hard fallback if nothing answers
+  setTimeout(() => { if (targetFrameId === null && !frames.size) { setConn('off', t('conn_offline')); updateUI(null); } }, 1500);
+}
+
+function selectTarget() {
+  if (!frames.size) { setConn('off', t('conn_offline')); updateUI(null); return; }
+  let best = null, bestScore = -1;
+  for (const [fid, cap] of frames) {
+    const score = cap.matchCount * 1000 + (cap.hasHme ? 100 : 0) + (cap.isTop ? 0 : 1);
+    if (score > bestScore) { bestScore = score; best = fid; }
   }
-
-  // Disable controls if not on iCloud
-  function disableAllControls() {
-    btnStartTraining.disabled = true;
-    btnResetTraining.disabled = true;
-    btnStartBot.disabled = true;
-    btnPauseBot.disabled = true;
-    btnStopBot.disabled = true;
-    selectMode.disabled = true;
-    inputFlags.disabled = true;
-    
-    const t = locales[currentLang];
-    botStatusBadge.textContent = t.status_offline;
-    botStatusBadge.className = "status-badge";
+  targetFrameId = best;
+  for (const fid of frames.keys()) {
+    if (fid !== best) sendRaw(fid, { action: 'SET_TARGET', isTarget: false, targeted: true });
   }
-
-  // Update UI Elements based on state object
-  function updateUI(state) {
-    if (!state) return;
-    const t = locales[currentLang];
-
-    // Update labels depending on the active Mode
-    const isDeleteMode = state.mode === 'delete';
-    document.querySelector('#selDeactivate .label').textContent = isDeleteMode ? t.delete_btn_label : t.deactivate_btn_label;
-
-    // 1. Selector Badges & Items
-    updateSelectorUI(selEmail, badgeEmail, state.selectors.email, 1, state.trainingStep);
-    updateSelectorUI(selDeactivate, badgeDeactivate, state.selectors.deactivate, 2, state.trainingStep);
-    updateSelectorUI(selConfirm, badgeConfirm, state.selectors.confirm, 3, state.trainingStep);
-
-    // 2. Training Buttons State
-    if (state.trainingStep > 0) {
-      btnStartTraining.disabled = true;
-      btnStartTraining.innerHTML = `<span class="btn-icon">🎯</span> ${t.status_training} ${state.trainingStep}...`;
-      btnResetTraining.disabled = true;
-      selectMode.disabled = true;
-      botStatusBadge.textContent = t.status_training;
-      botStatusBadge.className = "status-badge training";
-    } else {
-      btnStartTraining.disabled = false;
-      btnStartTraining.innerHTML = `<span class="btn-icon">🎯</span> ${t.btn_start_training}`;
-      btnResetTraining.disabled = !(state.selectors.email || state.selectors.deactivate || state.selectors.confirm);
-      selectMode.disabled = (state.botState !== 'idle');
-    }
-
-    // 3. Automation Buttons State
-    const isTrained = state.selectors.email && state.selectors.deactivate && state.selectors.confirm;
-    
-    if (state.botState === 'running') {
-      btnStartBot.disabled = true;
-      btnPauseBot.disabled = false;
-      btnStopBot.disabled = false;
-      btnStartTraining.disabled = true;
-      botStatusBadge.textContent = t.status_running;
-      botStatusBadge.className = "status-badge active";
-      
-      progressContainer.classList.remove('hidden');
-    } else if (state.botState === 'paused') {
-      btnStartBot.disabled = true;
-      btnPauseBot.disabled = true;
-      btnStopBot.disabled = false;
-      btnStartTraining.disabled = true;
-      botStatusBadge.textContent = t.status_paused;
-      botStatusBadge.className = "status-badge paused";
-      
-      progressContainer.classList.remove('hidden');
-    } else {
-      // Idle
-      btnStartBot.disabled = !isTrained;
-      btnPauseBot.disabled = true;
-      btnStopBot.disabled = true;
-      if (state.trainingStep === 0) {
-        botStatusBadge.textContent = isTrained ? t.status_ready : t.status_untrained;
-        botStatusBadge.className = "status-badge";
-      }
-      
-      progressContainer.classList.add('hidden');
-    }
-
-    // 4. Progress bar update
-    if (state.botState !== 'idle') {
-      const current = state.progress;
-      const limit = state.limit;
-      const percent = Math.min(100, Math.round((current / limit) * 100)) + '%';
-      
-      progressText.textContent = `${currentLang === 'en' ? 'Progress' : 'İlerleme'}: ${current} / ${limit}`;
-      progressPercent.textContent = percent;
-      progressBarFill.style.width = percent;
-    }
-
-    // 5. Sync Logs
-    if (state.logs && state.logs.length > 0) {
-      logConsole.innerHTML = '';
-      state.logs.forEach(log => {
-        const div = document.createElement('div');
-        div.className = `log-entry ${log.type}`;
-        div.textContent = log.text;
-        logConsole.appendChild(div);
-      });
-      logConsole.scrollTop = logConsole.scrollHeight;
-    }
-  }
-
-  function updateSelectorUI(itemEl, badgeEl, selectorVal, stepNum, currentStep) {
-    const t = locales[currentLang];
-    itemEl.className = "selector-item";
-    if (selectorVal) {
-      itemEl.classList.add("configured");
-      badgeEl.textContent = t.badge_configured;
-    } else if (currentStep === stepNum) {
-      itemEl.classList.add("active");
-      badgeEl.textContent = t.badge_waiting;
-    } else {
-      badgeEl.textContent = t.badge_not_configured;
-    }
-  }
-
-  // Send Action to Content Script
-  async function sendAction(action, extraData = {}) {
-    const tab = await getActiveTab();
-    if (!tab) return;
-    chrome.tabs.sendMessage(tab.id, { action, ...extraData }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn("Message response error:", chrome.runtime.lastError);
-        return;
-      }
-      if (response) {
-        updateUI(response.state || response);
+  sendRaw(best, { action: 'SET_TARGET', isTarget: true, targeted: true }, () => {
+    sendRaw(best, { action: 'GET_STATE', targeted: true }, resp => {
+      if (resp && resp.state) {
+        connected = true;
+        currentMode = resp.state.mode || currentMode;
+        syncSegs();
+        setConn('on', t('conn_connected', { mod: t('mode_' + currentMode), frame: best }));
+        updateUI(resp.state);
+      } else {
+        setConn('off', t('conn_offline'));
+        updateUI(null);
       }
     });
+  });
+}
+
+function sendRaw(frameId, msg, cb) {
+  if (activeTabId === null) return;
+  try {
+    chrome.tabs.sendMessage(activeTabId, msg, { frameId }, resp => {
+      void chrome.runtime.lastError;
+      if (cb) cb(resp);
+    });
+  } catch (e) { if (cb) cb(null); }
+}
+
+function sendAction(action, data = {}, cb) {
+  if (targetFrameId === null) { connect(); return; }
+  sendRaw(targetFrameId, { action, targeted: true, ...data }, resp => {
+    if (resp && resp.state) updateUI(resp.state);
+    if (cb) cb(resp);
+  });
+}
+
+function setConn(kind, text) {
+  const bar = $('connBar');
+  bar.classList.toggle('on', kind === 'on');
+  bar.classList.toggle('off', kind === 'off');
+  $('connText').textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// i18n rendering
+// ---------------------------------------------------------------------------
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  $('btnLangEN').classList.toggle('active', currentLang === 'en');
+  $('btnLangTR').classList.toggle('active', currentLang === 'tr');
+  document.documentElement.lang = currentLang;
+  renderParseInfo();
+  renderSteps(lastState);
+  renderSummary(lastState && lastState.lastSummary);
+  refreshChip();
+  if (lastState) setConn(connected ? 'on' : 'off',
+    connected ? t('conn_connected', { mod: t('mode_' + currentMode), frame: targetFrameId }) : t('conn_offline'));
+  else if (!connected) setConn('off', t('conn_offline'));
+  if (lastState && lastState.botState === 'paused') $('btnPauseBot').textContent = t('btn_resume');
+  else $('btnPauseBot').textContent = t('btn_pause');
+}
+
+function setLang(lang) {
+  currentLang = lang;
+  chrome.storage.local.set({ hmeLang: lang });
+  applyI18n();
+  sendAction('SET_LANG', { lang });
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  for (const p of ['run', 'training', 'rename', 'protect', 'logs']) {
+    $('panel-' + p).classList.toggle('hidden', p !== name);
+  }
+}
+
+let flashTimers = {};
+function flashTab(name) {
+  const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+  if (!btn || btn.classList.contains('active')) return;
+  btn.classList.add('flash');
+  clearTimeout(flashTimers[name]);
+  flashTimers[name] = setTimeout(() => btn.classList.remove('flash'), 800);
+}
+
+// ---------------------------------------------------------------------------
+// UI rendering
+// ---------------------------------------------------------------------------
+function syncSegs() {
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('active', b.dataset.mode === currentMode));
+  document.querySelectorAll('#trainModeSeg button').forEach(b => b.classList.toggle('active', b.dataset.mode === currentMode));
+}
+
+function stepLabels(mode) {
+  if (mode === 'rename') return [t('step_email'), t('step_label_input'), t('step_save')];
+  return [t('step_email'), mode === 'delete' ? t('step_action_delete') : t('step_action_deactivate'), t('step_confirm')];
+}
+
+function renderSteps(st) {
+  const mode = (st && st.mode) || currentMode;
+  const keys = STEP_KEYS[mode] || STEP_KEYS.deactivate;
+  const labels = stepLabels(mode);
+  for (let i = 0; i < 3; i++) {
+    const li = $('step' + (i + 1));
+    const badge = $('badge' + (i + 1));
+    $('stepLabel' + (i + 1)).textContent = labels[i];
+    const isSet = st && st.selectors && st.selectors[keys[i]] && (st.trainingStep === 0 || st.trainingStep > i + 1);
+    const isWaiting = st && st.trainingStep === i + 1;
+    li.classList.toggle('done', !!isSet);
+    li.classList.toggle('active', !!isWaiting);
+    badge.textContent = isWaiting ? t('badge_waiting') : isSet ? t('badge_set') : t('badge_unset');
+    badge.className = 'badge' + (isWaiting ? ' waiting' : isSet ? ' set' : '');
+  }
+}
+
+function statusFor(st) {
+  if (!connected || !st) return ['err', t('status_offline')];
+  if (st.trainingStep > 0) return ['run', t('status_training')];
+  if (st.botState === 'running' || st.botState === 'pausing') return ['run', t('status_running')];
+  if (st.botState === 'paused') return ['warn', t('status_paused')];
+  if (st.trained && st.trained[st.mode]) return ['ok', t('status_ready')];
+  return ['warn', t('status_untrained')];
+}
+
+function refreshChip() {
+  const [cls, label] = statusFor(lastState);
+  const chip = $('statusChip');
+  chip.className = 'chip ' + cls;
+  $('statusChipText').textContent = label;
+}
+
+function updateUI(st) {
+  if (!st) {
+    lastState = null;
+    refreshChip();
+    refreshButtons();
+    return;
+  }
+  lastState = st;
+  currentMode = st.mode || currentMode;
+  syncSegs();
+  refreshChip();
+
+  // run progress (deactivate/delete)
+  const isRename = st.mode === 'rename';
+  const running = st.botState !== 'idle';
+  $('progressBox').classList.toggle('hidden', isRename || !running);
+  $('renameProgress').classList.toggle('hidden', !isRename || !running);
+  if (running) {
+    const pct = st.limit ? Math.min(100, Math.round(st.progress / st.limit * 100)) : 0;
+    if (isRename) {
+      $('renameProgressText').textContent = `${st.progress} / ${st.limit}`;
+      $('renameProgressPct').textContent = pct + '%';
+      $('renameProgressFill').style.width = pct + '%';
+    } else {
+      $('progressText').textContent = `${st.progress} / ${st.limit}`;
+      $('progressPct').textContent = pct + '%';
+      $('progressFill').style.width = pct + '%';
+      const s = st.stats || {};
+      $('cntOk').textContent = s.processed || 0;
+      $('cntSkip').textContent = (s.skippedFlagged || 0) + (s.skippedProtected || 0);
+      $('cntFail').textContent = s.failed || 0;
+      $('cntMismatch').textContent = s.mismatch || 0;
+      $('cntMismatchBox').classList.toggle('hidden', !s.mismatch);
+    }
+    const cur = $('currentRow');
+    cur.classList.toggle('hidden', !st.currentItem);
+    if (st.currentItem) cur.textContent = t('current_prefix') + ' ' + st.currentItem;
   }
 
-  // Button Listeners
-  btnStartTraining.addEventListener('click', () => {
-    sendAction('START_TRAINING');
-  });
+  renderResults(st.renameResults || {});
+  renderSummary(st.lastSummary);
+  renderSteps(st);
 
-  btnResetTraining.addEventListener('click', () => {
-    const t = locales[currentLang];
-    if (confirm(t.confirm_reset)) {
-      sendAction('RESET_TRAINING');
-    }
-  });
+  // protection sync (avoid clobbering while typing)
+  $('protectCountRun').textContent = (st.protectedEmails || []).length;
+  $('protectNote').classList.toggle('hidden', st.mode !== 'delete');
+  if (document.activeElement !== $('inputProtLabel')) $('inputProtLabel').value = st.protectedLabel || '';
+  if (document.activeElement !== $('chkAutoProtect')) $('chkAutoProtect').checked = st.autoProtect !== false;
+  renderProtList(st.protectedEmails || []);
 
-  btnStartBot.addEventListener('click', () => {
-    const limit = parseInt(inputLimit.value) || 50;
-    const delay = parseInt(inputDelay.value) || 1500;
-    // Ensure settings are synced
-    sendAction('UPDATE_SETTINGS', { flaggedWords: inputFlags.value });
-    sendAction('START_BOT', { limit, delay });
-  });
+  // logs full sync when counts diverge (e.g. popup reopened)
+  const consoleEl = $('logConsole');
+  if (st.logs && consoleEl.childElementCount !== st.logs.length) {
+    consoleEl.innerHTML = '';
+    for (const entry of st.logs.slice(-200)) appendLog(entry, true);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
 
-  btnPauseBot.addEventListener('click', () => {
-    sendAction('PAUSE_BOT');
-  });
+  refreshButtons();
+}
 
-  btnStopBot.addEventListener('click', () => {
-    sendAction('STOP_BOT');
-  });
+function refreshButtons() {
+  const st = lastState;
+  const busy = st && st.botState !== 'idle';
+  const trainedNow = st && st.trained && st.trained[currentMode];
 
-  btnClearLogs.addEventListener('click', () => {
-    const t = locales[currentLang];
-    logConsole.innerHTML = `<div class="log-entry system">${t.confirm_clear_logs}</div>`;
-  });
+  $('btnStartBot').disabled = !connected || busy || !trainedNow || currentMode === 'rename' || (st && st.trainingStep > 0);
+  $('btnPauseBot').disabled = !connected || !busy || (st && (st.botState === 'paused' ? false : st.botState !== 'running'));
+  $('btnPauseBot').textContent = st && st.botState === 'paused' ? t('btn_resume') : t('btn_pause');
+  $('btnStopBot').disabled = !connected || !busy;
 
-  // Listen for background state/log updates from Content Script
-  chrome.runtime.onMessage.addListener((request) => {
-    if (request.action === 'STATE_UPDATE') {
-      updateUI(request.state);
-    } else if (request.action === 'LOG_UPDATE') {
-      const entry = document.createElement('div');
-      entry.className = `log-entry ${request.entry.type}`;
-      entry.textContent = request.entry.text;
-      logConsole.appendChild(entry);
-      logConsole.scrollTop = logConsole.scrollHeight;
-    }
-  });
+  $('btnStartTraining').disabled = !connected || busy || (st && st.trainingStep > 0);
+  $('btnResetTraining').disabled = !connected || !(trainedNow) || (st && st.trainingStep > 0);
 
-  // Initial state check
-  syncState();
-});
+  const { valid } = parseEmailList($('txtTargets').value);
+  const hasLabel = $('inputNewLabel').value.trim().length > 0;
+  const renameTrained = st && st.trained && st.trained.rename;
+  const renameBusy = st && st.botState !== 'idle' && st.mode === 'rename';
+  $('btnStartRename').disabled = !connected || !renameTrained || !valid.length || !hasLabel || (st && st.botState !== 'idle');
+  $('btnStopRename').disabled = !connected || !renameBusy;
+
+  // mode segment locks while running
+  document.querySelectorAll('#modeSeg button, #trainModeSeg button').forEach(b => { b.disabled = !!busy; });
+}
+
+function renderResults(results) {
+  const box = $('renameResults');
+  const entries = Object.entries(results || {});
+  box.classList.toggle('hidden', entries.length === 0);
+  const icons = { renamed: '✓', already: '⚠', notFound: '?', failed: '✗' };
+  box.innerHTML = '';
+  for (const [email, status] of entries) {
+    const row = document.createElement('div');
+    row.className = 'res-row ' + status;
+    const ico = document.createElement('span');
+    ico.className = 'ico';
+    ico.textContent = icons[status] || '·';
+    const mail = document.createElement('span');
+    mail.className = 'mail';
+    mail.textContent = email;
+    const stt = document.createElement('span');
+    stt.className = 'st';
+    stt.textContent = t('res_' + status) || status;
+    row.append(ico, mail, stt);
+    box.appendChild(row);
+  }
+}
+
+function renderSummary(s) {
+  const box = $('summaryBox');
+  if (!s || !s.ts) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const reasonKey = 'reason_' + (s.reason === 'goal' ? 'goal' : s.reason === 'exhausted' ? 'exhausted' : 'stopped');
+  const when = new Date(s.ts).toLocaleString();
+  box.innerHTML = '';
+  const title = document.createElement('b');
+  title.textContent = `${t('summary_title')} · ${t('mode_' + s.mode) || s.mode} · ${when}`;
+  const line = document.createElement('div');
+  line.textContent = `✓ ${s.processed} · ⛔ ${(s.skippedFlagged || 0) + (s.skippedProtected || 0)} · ✗ ${s.failed}` +
+    (s.notFound ? ` · ? ${s.notFound}` : '') + (s.mismatch ? ` · ⊘ ${s.mismatch}` : '') +
+    ` — ${t(reasonKey)}`;
+  box.append(title, line);
+}
+
+function renderProtList(list) {
+  const ul = $('protList');
+  ul.innerHTML = '';
+  $('protCount').textContent = list.length;
+  $('protectCountRun').textContent = list.length;
+  $('protEmpty').classList.toggle('hidden', list.length > 0);
+  ul.classList.toggle('hidden', list.length === 0);
+  for (const email of list) {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.className = 'mail';
+    span.textContent = email;
+    const x = document.createElement('button');
+    x.textContent = '✕';
+    x.title = email;
+    x.addEventListener('click', () => applyProtected(getProtected().filter(e => e !== email)));
+    li.append(span, x);
+    ul.appendChild(li);
+  }
+}
+
+function getProtected() {
+  if (lastState && Array.isArray(lastState.protectedEmails)) return lastState.protectedEmails;
+  return [];
+}
+function applyProtected(list) {
+  const clean = [...new Set(list.map(e => e.trim().toLowerCase()).filter(Boolean))];
+  chrome.storage.local.set({ hmeProtectedEmails: clean });
+  if (lastState) lastState.protectedEmails = clean;
+  renderProtList(clean);
+  sendAction('SET_PROTECTED', { emails: clean });
+}
+
+function parseEmailList(raw) {
+  const lines = String(raw || '').split(/[\n;]+/).flatMap(l => l.split(',')).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const valid = [], seen = new Set();
+  let ignored = 0;
+  for (const l of lines) {
+    if (EMAIL_LINE_RE.test(l)) { if (!seen.has(l)) { seen.add(l); valid.push(l); } }
+    else ignored++;
+  }
+  return { valid, ignored };
+}
+
+function renderParseInfo() {
+  const raw = $('txtTargets').value;
+  const info = $('parseInfo');
+  if (!raw.trim()) { info.textContent = ''; return; }
+  const { valid, ignored } = parseEmailList(raw);
+  info.textContent = t('parse_valid', { valid: valid.length }) + (ignored ? ' · ' + t('parse_ignored', { n: ignored }) : '');
+}
+
+// ---------------------------------------------------------------------------
+// Logs
+// ---------------------------------------------------------------------------
+function appendLog(entry, silent) {
+  if (!entry) return;
+  const consoleEl = $('logConsole');
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + (entry.type || 'system');
+  div.textContent = entry.text;
+  consoleEl.appendChild(div);
+  while (consoleEl.childElementCount > 300) consoleEl.removeChild(consoleEl.firstChild);
+  if (!silent) consoleEl.scrollTop = consoleEl.scrollHeight;
+}

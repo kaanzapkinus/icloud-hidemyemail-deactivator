@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hide My Email</title>
+<style>
+  body { margin: 0; padding: 20px 24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fff; color: #1d1d1f; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  h2 { font-size: 15px; margin: 12px 0 6px; color: #1d1d1f; }
+  #list-scroll { height: 400px; overflow-y: auto; border: 1px solid #d2d2d7; border-radius: 8px; padding: 0 12px; background: #fff; }
+  #forward-to { padding: 10px 4px; margin: 8px 0; border-top: 1px solid #e8e8ed; border-bottom: 1px solid #e8e8ed; background: #f5f5f7; font-size: 13px; color: #424245; border-radius: 4px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li.hme-item { display: flex; align-items: baseline; gap: 12px; padding: 9px 8px; border-bottom: 1px solid #f0f0f2; cursor: pointer; font-size: 13px; }
+  li.hme-item:hover { background: #f5f5f7; }
+  li.hme-item.selected { background: #e8f0fe; }
+  .hme-label { font-weight: 600; flex: 1; }
+  .hme-email { flex: 1.4; color: #515154; }
+  .hme-date { color: #86868b; font-size: 12px; }
+  #detail-panel { margin-top: 16px; padding: 14px 16px; border: 1px solid #d2d2d7; border-radius: 8px; max-width: 560px; background: #fbfbfd; transition: opacity 120ms ease; }
+  #detail-panel h3 { margin: 0 0 10px; font-size: 15px; }
+  #detail-panel .row { margin: 6px 0; font-size: 13px; }
+  #detail-panel .field-name { color: #6e6e73; display: inline-block; min-width: 52px; }
+  #label-input, #note-input { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; font-size: 13px; border: 1px solid #d2d2d7; border-radius: 6px; background: #fff; margin-top: 2px; }
+  .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 1px solid #d2d2d7; background: #fff; cursor: pointer; }
+  button:hover { background: #f5f5f7; }
+  #btn-save { background: #0071e3; border-color: #0071e3; color: #fff; }
+  #btn-save:hover { background: #0077ed; }
+  #btn-deactivate { background: #d70015; border-color: #d70015; color: #fff; }
+  #btn-deactivate:hover { background: #e01024; }
+  #confirm-modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; transition: opacity 120ms ease; }
+  #confirm-modal .modal-box { background: #fff; border-radius: 10px; padding: 20px 22px; max-width: 380px; box-shadow: 0 4px 18px rgba(0,0,0,.25); }
+  #confirm-text { font-size: 14px; margin-bottom: 16px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  #btn-confirm { background: #d70015; border-color: #d70015; color: #fff; }
+  #btn-confirm:hover { background: #e01024; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<h1>Hide My Email</h1>
+
+<div id="list-scroll">
+  <section id="active-section">
+    <h2 id="active-count">25 active email addresses</h2>
+    <ul id="active-list"></ul>
+  </section>
+  <div id="forward-to">Forward to: primary@example.com</div>
+  <section id="inactive-section">
+    <h2 id="inactive-count">15 inactive email addresses</h2>
+    <ul id="inactive-list"></ul>
+  </section>
+</div>
+
+<aside id="detail-panel" class="hidden">
+  <h3>Email details</h3>
+  <div class="row"><span class="field-name">Email:</span> <span id="detail-email"></span></div>
+  <div class="row"><span class="field-name">Label:</span> <span id="detail-label"></span></div>
+  <div class="row">
+    <label for="label-input" class="field-name">Edit label</label><br>
+    <input type="text" id="label-input">
+  </div>
+  <div class="row">
+    <label for="note-input" class="field-name">Note</label><br>
+    <textarea id="note-input" rows="3"></textarea>
+  </div>
+  <div class="panel-actions">
+    <button type="button" id="btn-save">Save changes</button>
+    <button type="button" id="btn-copy">Copy email address</button>
+    <button type="button" id="btn-deactivate">Deactivate email address</button>
+    <button type="button" id="btn-delete" class="hidden">Delete address</button>
+    <button type="button" id="btn-reactivate" class="hidden">Reactivate address</button>
+  </div>
+</aside>
+
+<div id="confirm-modal" class="hidden">
+  <div class="modal-box">
+    <div id="confirm-text"></div>
+    <div class="modal-actions">
+      <button type="button" id="btn-cancel">Cancel</button>
+      <button type="button" id="btn-confirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------- dataset
+  var CYCLE = ['Shopping', 'Newsletters', 'Travel', 'Banking', 'Apps'];
+  var SPECIAL = {
+    'active05@icloud.com': 'sakın silme',
+    'active12@icloud.com': 'sakın silme',
+    'inactive03@icloud.com': 'sakın silme',
+    'active07@icloud.com': 'Netflix account',
+    'inactive06@icloud.com': 'netflix backup'
+  };
+
+  function buildInitialItems() {
+    var out = [], c = 0, i, email;
+    for (i = 1; i <= 25; i++) {
+      email = 'active' + String(i).padStart(2, '0') + '@icloud.com';
+      out.push({ email: email, label: SPECIAL[email] || CYCLE[(c++) % 5], section: 'active' });
+    }
+    for (i = 1; i <= 15; i++) {
+      email = 'inactive' + String(i).padStart(2, '0') + '@icloud.com';
+      out.push({ email: email, label: SPECIAL[email] || CYCLE[(c++) % 5], section: 'inactive' });
+    }
+    return out;
+  }
+
+  var INITIAL_ITEMS = buildInitialItems();
+  var INITIAL_RENDER = { active: 12, inactive: 12 };
+  var BATCH = 4;
+  var PANEL_DELAY = 200;   // item click -> detail panel
+  var COMMIT_DELAY = 300;  // confirmed action -> model commit
+  var LOAD_DELAY = 150;    // scroll near bottom -> lazy batch
+  var BOTTOM_THRESHOLD = 50;
+
+  // ------------------------------------------------------------------ state
+  var items = INITIAL_ITEMS.map(function (o) { return { email: o.email, label: o.label, section: o.section }; });
+  var selectedEmail = null;
+  var panelToken = 0;
+  var confirmAction = null; // { type: 'deactivate' | 'delete', email }
+  var loadTimer = null;
+
+  window.__clicks = [];
+  window.__rendered = { active: 0, inactive: 0 };
+  window.__state = { pending: '' };
+  window.__failNext = 0;
+
+  // ------------------------------------------------------------------- dom
+  function $(id) { return document.getElementById(id); }
+  var listScroll = $('list-scroll');
+  var activeList = $('active-list');
+  var inactiveList = $('inactive-list');
+  var activeCount = $('active-count');
+  var inactiveCount = $('inactive-count');
+  var detailPanel = $('detail-panel');
+  var detailEmail = $('detail-email');
+  var detailLabel = $('detail-label');
+  var labelInput = $('label-input');
+  var noteInput = $('note-input');
+  var btnSave = $('btn-save');
+  var btnDeactivate = $('btn-deactivate');
+  var btnDelete = $('btn-delete');
+  var btnReactivate = $('btn-reactivate');
+  var modal = $('confirm-modal');
+  var confirmText = $('confirm-text');
+  var btnConfirm = $('btn-confirm');
+  var btnCancel = $('btn-cancel');
+
+  // -------------------------------------------------------------- helpers
+  function cmp(a, b) {
+    var al = a.label.toLowerCase(), bl = b.label.toLowerCase();
+    if (al !== bl) return al < bl ? -1 : 1;
+    if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+    if (a.email !== b.email) return a.email < b.email ? -1 : 1;
+    return 0;
+  }
+  function sectionItems(section) {
+    return items.filter(function (i) { return i.section === section; }).sort(cmp);
+  }
+  function findItem(email) {
+    for (var k = 0; k < items.length; k++) if (items[k].email === email) return items[k];
+    return null;
+  }
+  function totals() {
+    var act = items.filter(function (i) { return i.section === 'active'; }).length;
+    return { active: act, inactive: items.length - act };
+  }
+  function consumeFail() {
+    if (window.__failNext > 0) { window.__failNext--; return true; }
+    return false;
+  }
+
+  function makeLi(item) {
+    var li = document.createElement('li');
+    li.className = 'hme-item';
+    li.setAttribute('data-email', item.email);
+    li.setAttribute('data-section', item.section);
+    var lab = document.createElement('span');
+    lab.className = 'hme-label';
+    lab.textContent = item.label;
+    var em = document.createElement('span');
+    em.className = 'hme-email';
+    em.textContent = item.email;
+    var dt = document.createElement('span');
+    dt.className = 'hme-date';
+    dt.textContent = '2024-01-05';
+    li.appendChild(lab); li.appendChild(em); li.appendChild(dt);
+    if (item.email === selectedEmail) li.classList.add('selected');
+    return li;
+  }
+
+  function renderSection(section) {
+    var list = section === 'active' ? activeList : inactiveList;
+    var sorted = sectionItems(section);
+    var count = Math.min(window.__rendered[section], sorted.length);
+    window.__rendered[section] = count;
+    list.textContent = '';
+    sorted.slice(0, count).forEach(function (item) { list.appendChild(makeLi(item)); });
+  }
+
+  function renderCounts() {
+    var t = totals();
+    activeCount.textContent = t.active + ' active email addresses';
+    inactiveCount.textContent = t.inactive + ' inactive email addresses';
+  }
+
+  function renderAll() {
+    renderSection('active');
+    renderSection('inactive');
+    renderCounts();
+  }
+
+  function markSelected() {
+    var prev = document.querySelectorAll('li.hme-item.selected');
+    for (var k = 0; k < prev.length; k++) prev[k].classList.remove('selected');
+    if (selectedEmail) {
+      var li = document.querySelector('li.hme-item[data-email="' + selectedEmail + '"]');
+      if (li) li.classList.add('selected');
+    }
+  }
+
+  // ------------------------------------------------------------- lazy load
+  function renderMore() {
+    var t = totals(), changed = false;
+    ['active', 'inactive'].forEach(function (s) {
+      var add = Math.min(BATCH, t[s] - window.__rendered[s]);
+      if (add > 0) { window.__rendered[s] += add; changed = true; }
+    });
+    if (changed) renderAll();
+  }
+
+  listScroll.addEventListener('scroll', function () {
+    if (loadTimer) return;
+    var t = totals();
+    if (window.__rendered.active >= t.active && window.__rendered.inactive >= t.inactive) return;
+    var distance = listScroll.scrollHeight - listScroll.scrollTop - listScroll.clientHeight;
+    if (distance <= BOTTOM_THRESHOLD) {
+      loadTimer = setTimeout(function () { loadTimer = null; renderMore(); }, LOAD_DELAY);
+    }
+  });
+
+  // -------------------------------------------------------- detail panel
+  function fillPanel(item) {
+    detailEmail.textContent = item.email;
+    detailLabel.textContent = item.label;
+    labelInput.value = item.label;
+    noteInput.value = '';
+    window.__state.pending = item.label;
+    var isActive = item.section === 'active';
+    btnDeactivate.classList.toggle('hidden', !isActive);
+    btnDelete.classList.toggle('hidden', isActive);
+    btnReactivate.classList.toggle('hidden', isActive);
+    detailPanel.classList.remove('hidden');
+  }
+
+  function hidePanel() {
+    panelToken++; // cancel any pending show
+    detailPanel.classList.add('hidden');
+    selectedEmail = null;
+    markSelected();
+  }
+
+  document.addEventListener('click', function (e) {
+    var li = e.target.closest ? e.target.closest('li.hme-item') : null;
+    if (!li) return;
+    var email = li.getAttribute('data-email');
+    if (!findItem(email)) return;
+    window.__clicks.push({ type: 'item', email: email });
+    selectedEmail = email;
+    markSelected();
+    var token = ++panelToken;
+    setTimeout(function () {
+      if (token !== panelToken) return;
+      var item = findItem(email);
+      if (item) fillPanel(item);
+    }, PANEL_DELAY);
+  });
+
+  // Framework-like input binding: pending label is updated ONLY via the
+  // 'input' event. Setting labelInput.value directly (without dispatching
+  // 'input', e.g. missing native setter usage) leaves pending stale.
+  labelInput.addEventListener('input', function (e) {
+    window.__state.pending = e.target.value;
+  });
+
+  // ---------------------------------------------------------------- modal
+  function openModal(text, confirmLabel, action) {
+    confirmText.textContent = text;
+    btnConfirm.textContent = confirmLabel;
+    confirmAction = action;
+    modal.classList.remove('hidden');
+  }
+  function closeModal() {
+    modal.classList.add('hidden');
+    confirmAction = null;
+  }
+
+  btnDeactivate.addEventListener('click', function () {
+    if (!selectedEmail) return;
+    openModal('Deactivate this address?', 'Deactivate', { type: 'deactivate', email: selectedEmail });
+  });
+  btnDelete.addEventListener('click', function () {
+    if (!selectedEmail) return;
+    openModal('Delete this address?', 'Delete', { type: 'delete', email: selectedEmail });
+  });
+  btnCancel.addEventListener('click', closeModal);
+
+  function moveItem(item, toSection) {
+    var fromSection = item.section;
+    var fromSorted = sectionItems(fromSection);
+    var fromIdx = -1;
+    for (var k = 0; k < fromSorted.length; k++) if (fromSorted[k].email === item.email) { fromIdx = k; break; }
+    if (fromIdx >= 0 && fromIdx < window.__rendered[fromSection]) {
+      window.__rendered[fromSection] = Math.max(0, window.__rendered[fromSection] - 1);
+    }
+    item.section = toSection;
+    var toSorted = sectionItems(toSection);
+    var toIdx = -1;
+    for (var j = 0; j < toSorted.length; j++) if (toSorted[j].email === item.email) { toIdx = j; break; }
+    // Keep the moved item observable: ensure the destination render window
+    // covers its sorted position (grows by one when it lands inside).
+    if (toIdx >= 0) {
+      window.__rendered[toSection] = Math.min(
+        toSorted.length,
+        Math.max(window.__rendered[toSection] + 1, toIdx + 1)
+      );
+    }
+    renderAll();
+  }
+
+  function removeItem(item) {
+    var section = item.section;
+    var sorted = sectionItems(section);
+    var idx = -1;
+    for (var k = 0; k < sorted.length; k++) if (sorted[k].email === item.email) { idx = k; break; }
+    if (idx >= 0 && idx < window.__rendered[section]) {
+      window.__rendered[section] = Math.max(0, window.__rendered[section] - 1);
+    }
+    items = items.filter(function (i) { return i.email !== item.email; });
+    renderAll();
+  }
+
+  btnConfirm.addEventListener('click', function () {
+    if (!confirmAction) return;
+    var type = confirmAction.type, email = confirmAction.email;
+    window.__clicks.push({ type: type, email: email });
+    setTimeout(function () {
+      if (consumeFail()) { closeModal(); return; } // silent failure
+      var item = findItem(email);
+      if (!item) { closeModal(); return; }
+      if (type === 'deactivate') {
+        moveItem(item, 'inactive');
+        closeModal();
+        if (selectedEmail === email && !detailPanel.classList.contains('hidden')) fillPanel(item);
+      } else if (type === 'delete') {
+        removeItem(item);
+        closeModal();
+        if (selectedEmail === email) hidePanel();
+      }
+    }, COMMIT_DELAY);
+  });
+
+  btnReactivate.addEventListener('click', function () {
+    if (detailPanel.classList.contains('hidden') || !selectedEmail) return;
+    var email = selectedEmail;
+    window.__clicks.push({ type: 'reactivate', email: email });
+    setTimeout(function () {
+      var item = findItem(email);
+      if (!item || item.section !== 'inactive') return;
+      moveItem(item, 'active');
+      if (selectedEmail === email && !detailPanel.classList.contains('hidden')) fillPanel(item);
+    }, COMMIT_DELAY);
+  });
+
+  btnSave.addEventListener('click', function () {
+    if (detailPanel.classList.contains('hidden') || !selectedEmail) return;
+    var email = selectedEmail;
+    var pendingLabel = window.__state.pending;
+    window.__clicks.push({ type: 'save', email: email, label: pendingLabel });
+    setTimeout(function () {
+      if (consumeFail()) return; // silent failure: nothing changes
+      var item = findItem(email);
+      if (!item) return;
+      item.label = String(pendingLabel);
+      renderAll(); // resorts the section alphabetically
+      detailLabel.textContent = item.label;
+      document.dispatchEvent(new CustomEvent('hme:saved', { detail: { email: email, label: item.label } }));
+    }, COMMIT_DELAY);
+  });
+
+  // #btn-copy is intentionally a no-op.
+
+  // --------------------------------------------------------------- Escape
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('hidden')) { closeModal(); return; }
+    if (!detailPanel.classList.contains('hidden')) hidePanel();
+  });
+
+  // ------------------------------------------------------------ test hooks
+  window.__mock = {
+    items: function () {
+      return items.map(function (o) { return { email: o.email, label: o.label, section: o.section }; });
+    },
+    clicks: window.__clicks,
+    failNext: function (n) { window.__failNext = n; },
+    setLabel: function (email, label) {
+      var item = findItem(email);
+      if (!item) return false;
+      item.label = String(label);
+      renderAll();
+      if (selectedEmail === email && !detailPanel.classList.contains('hidden')) fillPanel(item);
+      return true;
+    },
+    rendered: window.__rendered,
+    reset: function () {
+      items = INITIAL_ITEMS.map(function (o) { return { email: o.email, label: o.label, section: o.section }; });
+      window.__clicks.length = 0;
+      window.__failNext = 0;
+      selectedEmail = null;
+      panelToken++;
+      confirmAction = null;
+      if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+      modal.classList.add('hidden');
+      detailPanel.classList.add('hidden');
+      window.__state.pending = '';
+      labelInput.value = '';
+      noteInput.value = '';
+      window.__rendered.active = INITIAL_RENDER.active;
+      window.__rendered.inactive = INITIAL_RENDER.inactive;
+      renderAll();
+      listScroll.scrollTop = 0;
+    }
+  };
+
+  // ----------------------------------------------------------------- init
+  window.__rendered.active = INITIAL_RENDER.active;
+  window.__rendered.inactive = INITIAL_RENDER.inactive;
+  renderAll();
+})();
+</script>
+</body>
+</html>

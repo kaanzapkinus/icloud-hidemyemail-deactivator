@@ -1,146 +1,200 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>iCloud Hide My Email Deactivator</title>
+  <title>HME Bot</title>
   <link rel="stylesheet" href="popup.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="logo-area">
-        <div class="logo-glow"></div>
-        <span class="logo-icon">🛡️</span>
-        <h1>HME Deactivator</h1>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-icon">🛡️</span>
+      <h1>HME Bot</h1>
+    </div>
+    <div class="header-right">
+      <div class="lang-switch" role="group">
+        <button id="btnLangEN" class="lang-btn">EN</button>
+        <button id="btnLangTR" class="lang-btn">TR</button>
       </div>
-      <div class="header-right">
-        <div class="lang-switch">
-          <button id="btnLangEN" class="lang-btn active">EN</button>
-          <button id="btnLangTR" class="lang-btn">TR</button>
-        </div>
-        <div class="status-badge" id="botStatusBadge">Idle</div>
-      </div>
-    </header>
+      <span id="statusChip" class="chip"><i class="chip-dot"></i><span id="statusChipText">—</span></span>
+    </div>
+  </header>
 
-    <!-- Mode Selector Card -->
-    <section class="card glass-card mode-card">
-      <div class="form-group">
-        <label for="selectMode">Çalışma Modülü</label>
-        <select id="selectMode" class="select-dropdown">
-          <option value="deactivate">Devre Dışı Bırak (Aktif ➔ Pasif)</option>
-          <option value="delete">Kalıcı Olarak Sil (Pasif ➔ Sil)</option>
-        </select>
+  <div id="connBar" class="conn">
+    <span id="connDot" class="conn-dot"></span>
+    <span id="connText" data-i18n="conn_searching">Searching for iCloud HME frame…</span>
+    <button id="btnReconnect" class="link-btn" title="Reconnect" data-i18n="btn_reconnect">Reconnect</button>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="run" data-i18n="tab_run">Run</button>
+    <button class="tab" data-tab="training" data-i18n="tab_training">Training</button>
+    <button class="tab" data-tab="rename" data-i18n="tab_rename">Rename</button>
+    <button class="tab" data-tab="protect" data-i18n="tab_protect">Protection</button>
+    <button class="tab" data-tab="logs" data-i18n="tab_logs">Logs</button>
+  </nav>
+
+  <main>
+    <!-- ================= RUN ================= -->
+    <section id="panel-run" class="panel">
+      <div class="field">
+        <label data-i18n="label_module">Module</label>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-mode="deactivate" data-i18n="mode_deactivate">Deactivate</button>
+          <button type="button" data-mode="delete" data-i18n="mode_delete">Delete</button>
+        </div>
       </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="inputDelay" data-i18n="label_delay">Delay (ms)</label>
+          <input type="number" id="inputDelay" min="500" max="10000" step="100" value="1500">
+        </div>
+        <div class="field">
+          <label for="inputLimit" data-i18n="label_limit">Limit</label>
+          <input type="number" id="inputLimit" min="1" max="1000" value="50">
+        </div>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="chkJitter">
+        <span data-i18n="label_jitter">Human-like delay variation (±30%)</span>
+      </label>
+
+      <div class="field">
+        <label for="inputFlags" data-i18n="label_flags">Blacklist keywords (comma separated)</label>
+        <input type="text" id="inputFlags" placeholder="netflix, spotify, important">
+      </div>
+
+      <div id="protectNote" class="note hidden">
+        <span data-i18n="protect_note">Protected addresses are skipped in Delete mode:</span>
+        <b id="protectCountRun">0</b>
+      </div>
+
+      <div class="btn-row">
+        <button id="btnStartBot" class="btn primary" disabled><span data-i18n="btn_start_bot">Start Bot</span></button>
+        <button id="btnPauseBot" class="btn warn" disabled data-i18n="btn_pause">Pause</button>
+        <button id="btnStopBot" class="btn danger" disabled data-i18n="btn_stop">Stop</button>
+      </div>
+
+      <div id="progressBox" class="progress-box hidden">
+        <div class="progress-info">
+          <span id="progressText">0 / 50</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="bar"><div id="progressFill" class="bar-fill"></div></div>
+        <div class="counters">
+          <span class="c-ok">✓ <b id="cntOk">0</b></span>
+          <span class="c-skip">⛔ <b id="cntSkip">0</b></span>
+          <span class="c-fail">✗ <b id="cntFail">0</b></span>
+          <span class="c-mm" id="cntMismatchBox">⊘ <b id="cntMismatch">0</b></span>
+        </div>
+        <div id="currentRow" class="current hidden"></div>
+      </div>
+
+      <div id="summaryBox" class="summary hidden"></div>
     </section>
 
-    <!-- Main Content Grid -->
-    <main class="app-content">
-      <!-- Section 1: Training -->
-      <section class="card glass-card">
-        <div class="card-header">
-          <span class="step-num">1</span>
-          <h2>Eğitim Modu (Setup)</h2>
-        </div>
-        <p class="card-desc">iCloud arayüzündeki öğeleri bota öğretmek için eğitimi başlatın.</p>
-        
-        <div class="btn-group">
-          <button id="btnStartTraining" class="btn btn-primary">
-            <span class="btn-icon">🎯</span> Eğitimi Başlat
-          </button>
-          <button id="btnResetTraining" class="btn btn-secondary" disabled>
-            Sıfırla
-          </button>
-        </div>
+    <!-- ================= TRAINING ================= -->
+    <section id="panel-training" class="panel hidden">
+      <p class="desc" data-i18n="training_desc">Teach the bot which elements to click. Training is saved per module and survives page reloads.</p>
 
-        <!-- Selector status list -->
-        <div class="selector-status-list">
-          <div class="selector-item" id="selEmail">
-            <span class="dot"></span>
-            <span class="label">E-posta Ögesi</span>
-            <span class="badge" id="badgeEmail">Seçilmedi</span>
-          </div>
-          <div class="selector-item" id="selDeactivate">
-            <span class="dot"></span>
-            <span class="label">Devre Dışı Bırak Butonu</span>
-            <span class="badge" id="badgeDeactivate">Seçilmedi</span>
-          </div>
-          <div class="selector-item" id="selConfirm">
-            <span class="dot"></span>
-            <span class="label">Onay Butonu</span>
-            <span class="badge" id="badgeConfirm">Seçilmedi</span>
-          </div>
+      <div class="field">
+        <label data-i18n="label_module">Module</label>
+        <div class="seg" id="trainModeSeg">
+          <button type="button" data-mode="deactivate" data-i18n="mode_deactivate">Deactivate</button>
+          <button type="button" data-mode="delete" data-i18n="mode_delete">Delete</button>
+          <button type="button" data-mode="rename" data-i18n="mode_rename">Rename</button>
         </div>
-      </section>
+      </div>
 
-      <!-- Section 2: Configuration & Control -->
-      <section class="card glass-card">
-        <div class="card-header">
-          <span class="step-num">2</span>
-          <h2>Bot Kontrol Paneli</h2>
-        </div>
-        
-        <div class="form-group row">
-          <div class="col">
-            <label for="inputDelay">Gecikme (ms)</label>
-            <input type="number" id="inputDelay" min="500" max="10000" value="1500" step="100">
-          </div>
-          <div class="col">
-            <label for="inputLimit">Limit (Adet)</label>
-            <input type="number" id="inputLimit" min="1" max="1000" value="50">
-          </div>
-        </div>
+      <ol class="steps" id="stepList">
+        <li class="step" id="step1"><span class="step-num">1</span><span class="step-label" id="stepLabel1">—</span><span class="badge" id="badge1">—</span></li>
+        <li class="step" id="step2"><span class="step-num">2</span><span class="step-label" id="stepLabel2">—</span><span class="badge" id="badge2">—</span></li>
+        <li class="step" id="step3"><span class="step-num">3</span><span class="step-label" id="stepLabel3">—</span><span class="badge" id="badge3">—</span></li>
+      </ol>
 
-        <div class="form-group" style="margin-top: 10px; display: flex; flex-direction: column; gap: 4px;">
-          <label for="inputFlags">Atlanacak E-postalar (Kara Liste Kelimeleri)</label>
-          <input type="text" id="inputFlags" placeholder="örn: netflix, amazon, personal">
-        </div>
+      <div class="btn-row">
+        <button id="btnStartTraining" class="btn primary" disabled data-i18n="btn_start_training">Start Training</button>
+        <button id="btnResetTraining" class="btn ghost" disabled data-i18n="btn_reset">Reset</button>
+      </div>
+      <p class="hint" data-i18n="training_hint">Start training, then click the 3 elements on the iCloud page, in order.</p>
+    </section>
 
-        <div class="btn-group-row">
-          <button id="btnStartBot" class="btn btn-success" disabled>
-            <span class="btn-icon">⚡</span> Botu Başlat
-          </button>
-          <button id="btnPauseBot" class="btn btn-warning" disabled>
-            Duraklat
-          </button>
-          <button id="btnStopBot" class="btn btn-danger" disabled>
-            Durdur
-          </button>
-        </div>
+    <!-- ================= RENAME ================= -->
+    <section id="panel-rename" class="panel hidden">
+      <p class="desc" data-i18n="rename_desc">Paste addresses (one per line). The bot finds each one in the active + inactive lists and sets its label. Requires the Rename training.</p>
 
-        <!-- Progress bar container -->
-        <div class="progress-container hidden" id="progressContainer">
-          <div class="progress-info">
-            <span id="progressText">İlerleme: 0 / 50</span>
-            <span id="progressPercent">0%</span>
-          </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
-          </div>
-        </div>
-      </section>
+      <div class="field">
+        <label for="txtTargets" data-i18n="label_targets">Email list</label>
+        <textarea id="txtTargets" rows="6" spellcheck="false" placeholder="yunus-kurtlar7r@icloud.com&#10;uzunyay.eser3w@icloud.com"></textarea>
+        <div id="parseInfo" class="hint"></div>
+      </div>
 
-      <!-- Section 3: Live Logs -->
-      <section class="card glass-card log-card">
-        <div class="card-header justify-between">
-          <h2>İşlem Günlüğü (Logs)</h2>
-          <button id="btnClearLogs" class="btn-text">Temizle</button>
-        </div>
-        <div class="log-console" id="logConsole">
-          <div class="log-entry system">Bot hazır. Başlamak için eğitimi tamamlayın veya kayıtlı şablonu kullanın.</div>
-        </div>
-      </section>
-    </main>
+      <div class="field">
+        <label for="inputNewLabel" data-i18n="label_new_label">New label</label>
+        <input type="text" id="inputNewLabel" placeholder="sakın silme">
+      </div>
 
-    <!-- Footer -->
-    <footer class="app-footer">
-      <span>iCloud.com/icloudplus sayfasında açık olmalıdır.</span>
-    </footer>
-  </div>
+      <label class="check">
+        <input type="checkbox" id="chkAutoProtect" checked>
+        <span data-i18n="label_auto_protect">Automatically add renamed addresses to the protection list</span>
+      </label>
+
+      <div class="btn-row">
+        <button id="btnStartRename" class="btn primary" disabled data-i18n="btn_start_rename">Start Rename</button>
+        <button id="btnStopRename" class="btn danger" disabled data-i18n="btn_stop">Stop</button>
+      </div>
+
+      <div id="renameProgress" class="progress-box hidden">
+        <div class="progress-info"><span id="renameProgressText">0 / 0</span><span id="renameProgressPct">0%</span></div>
+        <div class="bar"><div id="renameProgressFill" class="bar-fill"></div></div>
+      </div>
+      <div id="renameResults" class="results hidden"></div>
+    </section>
+
+    <!-- ================= PROTECTION ================= -->
+    <section id="panel-protect" class="panel hidden">
+      <p class="desc" data-i18n="protect_desc">Protected addresses are never clicked during a Delete run. Protection uses both the exact address list and the protected label (double safety).</p>
+
+      <div class="field">
+        <label for="inputProtLabel" data-i18n="label_protected_label">Protected label</label>
+        <input type="text" id="inputProtLabel" placeholder="sakın silme">
+      </div>
+
+      <div class="field">
+        <label for="txtProtAdd" data-i18n="label_add_emails">Add addresses (one per line)</label>
+        <textarea id="txtProtAdd" rows="3" spellcheck="false" placeholder="address@icloud.com"></textarea>
+        <div class="btn-row">
+          <button id="btnProtAdd" class="btn ghost" data-i18n="btn_add">Add</button>
+          <button id="btnProtCopy" class="btn ghost" data-i18n="btn_copy_list">Copy list</button>
+          <button id="btnProtClear" class="btn ghost danger-text" data-i18n="btn_clear_list">Clear list</button>
+        </div>
+      </div>
+
+      <div class="prot-head">
+        <span data-i18n="label_protected_list">Protected addresses</span>
+        <b id="protCount">0</b>
+      </div>
+      <ul id="protList" class="prot-list"></ul>
+      <p id="protEmpty" class="hint" data-i18n="prot_empty">List is empty. Add addresses manually or via the Rename tab.</p>
+    </section>
+
+    <!-- ================= LOGS ================= -->
+    <section id="panel-logs" class="panel hidden">
+      <div class="logs-head">
+        <span data-i18n="title_logs">Process logs</span>
+        <button id="btnClearLogs" class="link-btn" data-i18n="btn_clear">Clear</button>
+      </div>
+      <div id="logConsole" class="log-console"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span data-i18n="footer_text">The iCloud.com → Hide My Email page must be open.</span>
+  </footer>
+
   <script src="popup.js"></script>
 </body>
 </html>
