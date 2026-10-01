@@ -51,6 +51,21 @@ const locales = {
     mode_rename_pick: 'Choose Deactivate or Delete in the Run tab before starting the bot.',
     err_wrong_frame: 'Wrong frame: HME content not detected here. Reopen the extension on the Hide My Email page.',
     relinked: 'Selector repaired automatically: {sel}',
+    training_skip_available: 'Step {step} is optional — use "Skip step" if the site shows no such dialog.',
+    training_step_skipped: 'Step {step} skipped (not present on this site).',
+    btn_skip_step: 'Skip this step',
+    untrained_reactivate_hint: 'Reactivate training: 1) email item, 2) "Reactivate address" button. Step 3 (confirm) is optional.',
+    reactivate_started_label: 'Reactivate started · label "{label}"',
+    reactivate_started_list: 'Reactivate started · {n} addresses from list',
+    reactivate_done: '✓ Reactivated: {email}',
+    reactivate_not_found: '✗ Not found in the inactive list: {email}',
+    reactivate_no_label_match: 'No inactive address matched the label "{label}".',
+    reactivate_empty_label: 'Enter a label to reactivate by label.',
+    reactivate_empty_list: 'Paste at least one address to reactivate from a list.',
+    undo_nothing: 'Nothing to undo (deletions cannot be undone).',
+    undo_busy: 'Stop the current run before undoing.',
+    undo_done: 'Undo finished: {ok} restored, {fail} failed.',
+    verify_report: 'Ground truth — expected {expected}, page shows {actual}, bot reported {claimed}.',
     untrained_rename_hint: 'Rename training: 1) email item, 2) label input, 3) Save button.',
     overlay_title: 'HME Bot',
     overlay_training: 'Training',
@@ -112,8 +127,22 @@ const locales = {
     bot_paused: 'Bot duraklatıldı.',
     bot_resumed: 'Bot devam ediyor.',
     bot_stopped: 'Bot durduruldu.',
-    goal_reached: 'Hedefe ulaşıldı: {n} işlendi.',
-    summary: 'Özet — ✓ {processed} işlenen · ⛔ {flagged} kara liste · 🛡 {protected} korunan · ✗ {failed} başarısız · ? {notFound} bulunamadı · ⊘ {mismatch} uyumsuz',
+    relinked: 'Seçici otomatik onarıldı: {sel}',
+    training_skip_available: '{step}. adım isteğe bağlı — sitede böyle bir pencere yoksa "Adımı atla" düğmesini kullan.',
+    training_step_skipped: '{step}. adım atlandı (bu sitede yok).',
+    btn_skip_step: 'Bu adımı atla',
+    untrained_reactivate_hint: 'Yeniden aktifleştirme eğitimi: 1) e-posta öğesi, 2) "Yeniden etkinleştir" butonu. 3. adım (onay) isteğe bağlıdır.',
+    reactivate_started_label: 'Yeniden aktifleştirme başladı · etiket "{label}"',
+    reactivate_started_list: 'Yeniden aktifleştirme başladı · listeden {n} adres',
+    reactivate_done: '✓ Yeniden aktifleştirildi: {email}',
+    reactivate_not_found: '✗ Pasif listede bulunamadı: {email}',
+    reactivate_no_label_match: '"{label}" etiketiyle eşleşen pasif adres yok.',
+    reactivate_empty_label: 'Etikete göre aktifleştirmek için bir etiket girin.',
+    reactivate_empty_list: 'Listeden aktifleştirmek için en az bir adres yapıştırın.',
+    undo_nothing: 'Geri alınacak bir şey yok (silme geri alınamaz).',
+    undo_busy: 'Geri almadan önce mevcut koşuyu durdurun.',
+    undo_done: 'Geri alma bitti: {ok} geri alındı, {fail} başarısız.',
+    verify_report: 'Gerçek durum — beklenen {expected}, sayfada {actual}, bot {claimed} bildirdi.',
     rename_started: 'Yeniden adlandırma başladı · {n} hedef · etiket "{label}"',
     rename_done: '✓ Yeniden adlandırıldı: {email} → "{label}"',
     rename_already: '⚠ Zaten "{label}" etiketli: {email}',
@@ -165,8 +194,14 @@ const HME_MARKER_RE = /(hide my email|e-?postam[ıi] gizle|active email address|
 const TRAINING_STEPS = {
   deactivate: ['email', 'deactivate', 'confirm'],
   delete: ['email', 'deactivate', 'confirm'],
-  rename: ['email', 'labelInput', 'save']
+  rename: ['email', 'labelInput', 'save'],
+  // Reactivate: 3rd step (confirm) is OPTIONAL — Apple usually reactivates
+  // without a confirmation dialog. A run without it completes the step on
+  // "action clicked + row moved", which is the real evidence of success.
+  reactivate: ['email', 'deactivate', 'confirm']
 };
+const OPTIONAL_TRAINING_STEPS = { reactivate: ['confirm'] };
+const MATCH_MODES = ['exact', 'contains', 'word'];
 const EXHAUSTED = Symbol('exhausted');
 const frameKey = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -177,7 +212,8 @@ let state = {
   cachedSelectors: {
     deactivate: { email: null, deactivate: null, confirm: null },
     delete: { email: null, deactivate: null, confirm: null },
-    rename: { email: null, labelInput: null, save: null }
+    rename: { email: null, labelInput: null, save: null },
+    reactivate: { email: null, deactivate: null, confirm: null }
   },
   trainingStep: 0,
   botState: 'idle',            // idle | running | pausing | paused
@@ -195,6 +231,17 @@ let state = {
   renameTargets: [],
   renameLabel: '',
   renameResults: {},
+  // reactivate
+  reactivateSource: 'label',    // 'label' | 'list'
+  reactivateLabel: '',
+  reactivateTargets: [],
+  reactivateResults: {},
+  reactivateSearchExhausted: false,
+  // matching mode for protectedLabel / flaggedWords
+  matchMode: 'contains',        // exact | contains | word
+  flaggedMatchMode: 'contains',
+  // undo of the last run
+  lastRunUndo: null,
   lastSummary: null,
   currentItem: '',
   skipSet: new Set(),          // emails not to click again this run
@@ -239,6 +286,7 @@ function loadFromStorage(result) {
   if (result.hmeSelectors_deactivate) state.cachedSelectors.deactivate = result.hmeSelectors_deactivate;
   if (result.hmeSelectors_delete) state.cachedSelectors.delete = result.hmeSelectors_delete;
   if (result.hmeSelectors_rename) state.cachedSelectors.rename = result.hmeSelectors_rename;
+  if (result.hmeSelectors_reactivate) state.cachedSelectors.reactivate = result.hmeSelectors_reactivate;
   if (result.hmeFlaggedWords !== undefined) state.flaggedWords = parseFlagged(result.hmeFlaggedWords);
   if (Array.isArray(result.hmeProtectedEmails)) state.protectedEmails = new Set(result.hmeProtectedEmails.map(normalizeEmail));
   if (result.hmeProtectedLabel !== undefined) state.protectedLabel = result.hmeProtectedLabel || '';
@@ -247,6 +295,9 @@ function loadFromStorage(result) {
   if (result.hmeLimit) state.limit = parseInt(result.hmeLimit) || state.limit;
   if (result.hmeJitter !== undefined) state.jitter = !!result.hmeJitter;
   if (result.hmeRenameLabel) state.renameLabel = result.hmeRenameLabel;
+  if (MATCH_MODES.includes(result.hmeMatchMode)) state.matchMode = result.hmeMatchMode;
+  if (MATCH_MODES.includes(result.hmeFlaggedMatchMode)) state.flaggedMatchMode = result.hmeFlaggedMatchMode;
+  if (result.hmeReactivateLabel) state.reactivateLabel = result.hmeReactivateLabel;
   if (result.hmeLastSummary) state.lastSummary = result.hmeLastSummary;
   if (result.hmeOverlayPos) state.overlayPos = result.hmeOverlayPos;
   if (result.hmeOverlayMin !== undefined) state.overlayMin = !!result.hmeOverlayMin;
@@ -289,7 +340,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if ('hmeProtectedLabel' in patch) state.protectedLabel = patch.hmeProtectedLabel || '';
   if ('hmeAutoProtect' in patch) state.autoProtect = !!patch.hmeAutoProtect;
   if ('hmeLang' in patch && patch.hmeLang) { state.lang = patch.hmeLang; updateOverlay(); }
-  for (const m of ['deactivate', 'delete', 'rename']) {
+  if ('hmeMatchMode' in patch && MATCH_MODES.includes(patch.hmeMatchMode)) state.matchMode = patch.hmeMatchMode;
+  if ('hmeFlaggedMatchMode' in patch && MATCH_MODES.includes(patch.hmeFlaggedMatchMode)) state.flaggedMatchMode = patch.hmeFlaggedMatchMode;
+  for (const m of ['deactivate', 'delete', 'rename', 'reactivate']) {
     const key = 'hmeSelectors_' + m;
     if (key in patch) {
       state.cachedSelectors[m] = patch[key] || { email: null };
@@ -297,8 +350,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
   }
   // keep popup in sync when selectors/protection change (training, other frames, tests)
-  if (['hmeProtectedEmails', 'hmeProtectedLabel', 'hmeAutoProtect',
-       'hmeSelectors_deactivate', 'hmeSelectors_delete', 'hmeSelectors_rename'].some(k => k in patch)) {
+  if (['hmeProtectedEmails', 'hmeProtectedLabel', 'hmeAutoProtect', 'hmeMatchMode', 'hmeFlaggedMatchMode',
+       'hmeSelectors_deactivate', 'hmeSelectors_delete', 'hmeSelectors_rename', 'hmeSelectors_reactivate'].some(k => k in patch)) {
     broadcastState();
   }
 });
@@ -364,15 +417,22 @@ function publicState() {
   return {
     lang: state.lang, mode: state.mode, selectors: state.selectors,
     trained: {
-      deactivate: isTrained('deactivate'), delete: isTrained('delete'), rename: isTrained('rename')
+      deactivate: isTrained('deactivate'), delete: isTrained('delete'),
+      rename: isTrained('rename'), reactivate: isTrained('reactivate')
     },
     trainingStep: state.trainingStep, botState: state.botState, isTargetFrame: state.isTargetFrame,
     limit: state.limit, delay: state.delay, jitter: state.jitter,
     progress: state.progress, stats: { ...state.stats }, currentItem: state.currentItem,
     logs: state.logs.slice(-200),
-    flaggedWords: state.flaggedWords.slice(),
+    flaggedWords: state.flaggedWords.slice(), flaggedMatchMode: state.flaggedMatchMode,
     protectedEmails: [...state.protectedEmails], protectedLabel: state.protectedLabel, autoProtect: state.autoProtect,
+    matchMode: state.matchMode,
     renameTargets: state.renameTargets.slice(), renameLabel: state.renameLabel, renameResults: { ...state.renameResults },
+    reactivateSource: state.reactivateSource, reactivateLabel: state.reactivateLabel,
+    reactivateTargets: state.reactivateTargets.slice(), reactivateResults: { ...state.reactivateResults },
+    undoAvailable: !!(state.lastRunUndo && state.lastRunUndo.entries && state.lastRunUndo.entries.length),
+    undoCount: state.lastRunUndo && state.lastRunUndo.entries ? state.lastRunUndo.entries.length : 0,
+    undoMode: state.lastRunUndo ? state.lastRunUndo.mode : null,
     lastSummary: state.lastSummary,
     frame: frameCapability()
   };
@@ -716,9 +776,22 @@ function getInteractiveTarget(element) {
   return element;
 }
 
+// A mode is "trained" when all REQUIRED steps are set. Steps listed in
+// OPTIONAL_TRAINING_STEPS (reactivate's confirm — Apple usually has no dialog)
+// may be missing: the run then verifies success by the action click plus the
+// row moving, which is stronger evidence than a dialog click anyway.
 function isTrained(mode) {
   const s = state.cachedSelectors[mode] || {};
-  return TRAINING_STEPS[mode].every(k => s[k]);
+  const optional = OPTIONAL_TRAINING_STEPS[mode] || [];
+  return TRAINING_STEPS[mode].every(k => optional.includes(k) || (s[k] && s[k].selector));
+}
+function trainingStepComplete(mode, key) {
+  const s = state.cachedSelectors[mode] || {};
+  return !!(s[key] && s[key].selector);
+}
+function trainingRequiredSteps(mode) {
+  const optional = OPTIONAL_TRAINING_STEPS[mode] || [];
+  return TRAINING_STEPS[mode].filter(k => !optional.includes(k));
 }
 
 function pageClickHandler(e) {
@@ -742,23 +815,44 @@ function pageClickHandler(e) {
   else addLog('success', t('action_selected') + `"${label}"`);
 
   state.trainingStep++;
-  if (state.trainingStep > TRAINING_STEPS[state.mode].length) {
-    // done
-    const saved = {};
-    for (const k of TRAINING_STEPS[state.mode]) saved[k] = state.selectors[k];
-    state.cachedSelectors[state.mode] = saved;
-    chrome.storage.local.set({
-      ['hmeSelectors_' + state.mode]: saved,
-      hmeTrainingClaim: null
-    }, () => addLog('success', t('training_saved')));
-    state.trainingStep = 0;
-    document.removeEventListener('click', pageClickHandler, true);
-    setTimeout(() => removeOverlay(), 2500);
-  } else {
+  if (state.trainingStep > TRAINING_STEPS[state.mode].length) finishTraining();
+  else {
+    // Optional step the site does not have: let the user skip it instead of
+    // forcing a click on something that will never appear.
+    const nextKey = TRAINING_STEPS[state.mode][state.trainingStep - 1];
+    if ((OPTIONAL_TRAINING_STEPS[state.mode] || []).includes(nextKey)) {
+      addLog('system', t('training_skip_available', { step: state.trainingStep }));
+    }
     createOverlay();
   }
   updateOverlay();
   broadcastState();
+}
+
+function finishTraining() {
+  const saved = {};
+  for (const k of TRAINING_STEPS[state.mode]) saved[k] = state.selectors[k];
+  state.cachedSelectors[state.mode] = saved;
+  chrome.storage.local.set({
+    ['hmeSelectors_' + state.mode]: saved,
+    hmeTrainingClaim: null
+  }, () => addLog('success', t('training_saved')));
+  state.trainingStep = 0;
+  document.removeEventListener('click', pageClickHandler, true);
+  setTimeout(() => removeOverlay(), 2500);
+}
+
+// Skip the current (optional) training step — used when the site has no such dialog.
+function skipTrainingStep() {
+  if (state.trainingStep === 0) return false;
+  const key = TRAINING_STEPS[state.mode][state.trainingStep - 1];
+  if (!(OPTIONAL_TRAINING_STEPS[state.mode] || []).includes(key)) return false;
+  state.selectors[key] = null;
+  addLog('system', t('training_step_skipped', { step: state.trainingStep }));
+  state.trainingStep++;
+  if (state.trainingStep > TRAINING_STEPS[state.mode].length) finishTraining();
+  else { createOverlay(); updateOverlay(); broadcastState(); }
+  return true;
 }
 
 function startTraining() {
@@ -795,19 +889,93 @@ function resetTraining() {
 }
 
 // ---------------------------------------------------------------------------
-// Protection / filtering
+// Protection / filtering with selectable match mode
 // ---------------------------------------------------------------------------
+// exact    → label must equal the filter ("sakın silme" matches only that)
+// contains → filter anywhere in the label ("sakın silme" also matches
+//             "SAKIN SİLME NİNTENDO SWİTCH")
+// word     → whole-word match ("sakın silme" matches "sakın silme nintendo"
+//             but NOT "sakınsever")
+function isInInactiveSection(el) {
+  // A reactivate label run must not pick ACTIVE rows (they are already active
+  // and have no "Reactivate" button). Sections are recognized by their heading
+  // text; if nothing matches we do not exclude anything.
+  let c = el ? el.parentElement : null;
+  for (let i = 0; i < 6 && c && c !== document.body; i++, c = c.parentElement) {
+    const head = c.previousElementSibling;
+    const txt = ((head && head.textContent) || '').toLowerCase();
+    if (/inactive|pasif/.test(txt)) return true;
+    if (/active|aktif/.test(txt) && !/inactive|pasif/.test(txt)) return false;
+  }
+  return null; // unknown layout
+}
+
+function labelOf(el) {
+  if (!el) return '';
+  // Email and date sit in sibling text nodes, so textContent glues them onto the
+  // label ("Appsactive06@icloud.com2024-01-05"). Walk the text nodes and take
+  // the first one that is neither an address, a date, nor a bare number.
+  try {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let n, first = null;
+    while ((n = walker.nextNode())) {
+      const txt = (n.nodeValue || '').trim();
+      if (!txt) continue;
+      if (EMAIL_RE.test(txt)) continue;                  // the address
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(txt)) continue;  // the date
+      if (/^\d+$/.test(txt)) continue;                   // bare numbers
+      if (!first) first = txt;
+    }
+    if (first) return first;
+  } catch (e) {}
+  const raw = el.textContent || '';
+  const cleaned = String(raw)
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, ' ')
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')
+    .replace(/\b\d{1,2}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || String(raw).trim();
+}
+
+function matchTerm(term, mode) {
+  const m = MATCH_MODES.includes(mode) ? mode : 'contains';
+  return { term: normalizeLabel(term), mode: m };
+}
+
+function matchesFilter(label, term, mode) {
+  const { term: t1, mode: m } = matchTerm(term, mode);
+  if (!t1) return false;
+  const l = normalizeLabel(label);
+  if (!l) return false;
+  if (m === 'exact') return l === t1;
+  if (m === 'word') {
+    if (l === t1) return true;
+    const re = new RegExp('(^|[^\\p{L}\\p{N}])' + t1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^\\p{L}\\p{N}]|$)', 'u');
+    return re.test(l);
+  }
+  return l.includes(t1);
+}
+
+// Which filter matched (for the log line) — returns the matched term or null
+function firstMatchingTerm(label, terms, mode) {
+  for (const w of terms) if (matchesFilter(label, w, mode)) return w;
+  return null;
+}
+
 function isFlagged(el) {
   if (!state.flaggedWords.length) return false;
-  const text = (el.textContent || '').toLowerCase();
-  return state.flaggedWords.some(w => text.includes(w));
+  const label = labelOf(el);
+  const hit = firstMatchingTerm(label, state.flaggedWords, state.flaggedMatchMode || 'contains');
+  if (hit) state.lastFlagHit = hit;
+  return !!hit;
 }
 function isProtectedEmail(el) {
   if (!state.protectedEmails.size && !state.protectedLabel) return false;
   const email = extractEmail(el);
   if (email && state.protectedEmails.has(email)) return true;
-  const label = state.protectedLabel.trim().toLowerCase();
-  return !!label && (el.textContent || '').toLowerCase().includes(label);
+  if (state.protectedLabel && matchesFilter(labelOf(el), state.protectedLabel, state.matchMode)) return true;
+  return false;
 }
 function countSkipOnce(bucket, email, logKey) {
   const key = bucket + ':' + email;
@@ -1132,7 +1300,7 @@ async function runLoop() {
     }
   } finally {
     loopActive = false;
-    if (startPending) { startPending = false; if (running()) (state.mode === 'rename' ? runRenameLoop() : runLoop()); }
+    if (startPending) { startPending = false; if (running()) (state.mode === 'rename' ? runRenameLoop() : state.mode === 'reactivate' ? runReactivateLoop() : runLoop()); }
   }
 }
 
@@ -1183,6 +1351,9 @@ async function processRename(target) {
     };
     await waitForPanelBinding(getInput, target);
     const cur = await waitForStableInput(getInput);
+    // remember the original label so the run can be undone later
+    if (!state.renamePrevLabels) state.renamePrevLabels = {};
+    if (cur && !state.renamePrevLabels[target]) state.renamePrevLabels[target] = cur;
     const input = getInput();
     if (cur === null || !input) {
       dismissUi(DISMISS_SCOPES);
@@ -1240,6 +1411,7 @@ async function runRenameLoop() {
       if (res === 'renamed') {
         state.stats.processed++;
         addLog('success', t('rename_done', { email: target, label: state.renameLabel }));
+        recordUndo({ type: 'rename', email: target, prevLabel: (state.renamePrevLabels || {})[target] || '' });
         renamedForProtection.push(target);
       } else if (res === 'already') {
         state.stats.processed++;
@@ -1270,14 +1442,302 @@ async function runRenameLoop() {
     if (active()) finishRun('goal');
   } finally {
     loopActive = false;
-    if (startPending) { startPending = false; if (running()) (state.mode === 'rename' ? runRenameLoop() : runLoop()); }
+    if (startPending) { startPending = false; if (running()) (state.mode === 'rename' ? runRenameLoop() : state.mode === 'reactivate' ? runReactivateLoop() : runLoop()); }
     if (renamedForProtection.length && state.autoProtect) addProtectedEmails(renamedForProtection);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle
+// Bot core: reactivate (inactive -> active)
+// Source: a label filter (reactivate everything whose label matches) or an
+// explicit pasted address list. Same action/confirm pipeline as delete, so the
+// verified-step guarantees carry over.
 // ---------------------------------------------------------------------------
+async function processReactivateOne(target) {
+  const newLabel = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (!active()) return 'aborted';
+    let item = null;
+    if (state.reactivateSearchExhausted) {
+      item = queryEmailItems().find(x => extractEmail(x) === target) || null;
+      if (!item) {
+        const found = await findTargetItem(target);
+        if (found !== EXHAUSTED) item = found;
+      }
+    } else {
+      const found = await findTargetItem(target);
+      if (found === EXHAUSTED) { state.reactivateSearchExhausted = true; item = null; }
+      else item = found;
+    }
+    if (!active()) return 'aborted';
+    if (!item) return 'notFound';
+    let node = freshItemNode(target) || item;
+    try { node.scrollIntoView({ block: 'center' }); } catch (e) {}
+    await sleep(120);
+    node = freshItemNode(target) || node;
+    node.click();
+
+    const findAction = () => {
+      const el = findElement(state.selectors.deactivate);
+      return el && isVisible(el) && !el.disabled ? el : null;
+    };
+    let actionEl = await waitFor(findAction, { timeout: 4000 });
+    if (!actionEl) { relinkSelectorFromText('deactivate'); actionEl = await waitFor(findAction, { timeout: 2500 }); }
+    if (!actionEl) {
+      const fresh = freshItemNode(target);
+      if (fresh) { try { fresh.scrollIntoView({ block: 'center' }); } catch (e) {} fresh.click(); actionEl = await waitFor(findAction, { timeout: 2500 }); }
+    }
+    if (actionEl) {
+      await waitForPanelBinding(findAction, target);
+      actionEl = findAction();
+    }
+    if (!actionEl) {
+      dismissUi(DISMISS_SCOPES);
+      state.skipSet.add(target);
+      learnMismatchSection(freshItemNode(target) || item);
+      state.stats.mismatch++;
+      addLog('warning', t('err_action_missing', { email: target }));
+      return 'mismatch';
+    }
+    const priorLabel = labelOf(freshItemNode(target) || item);
+    if (!active()) { dismissUi(DISMISS_SCOPES); return 'aborted'; }
+    actionEl.click();
+
+    // Optional confirm step (Apple often has none for reactivate)
+    const hasConfirmSelector = !!(state.selectors.confirm && state.selectors.confirm.selector);
+    let confirmed = false;
+    if (hasConfirmSelector) {
+      const confirmEl = await waitFor(() => {
+        const el = findElement(state.selectors.confirm);
+        return el && isVisible(el) && !el.disabled ? el : null;
+      }, { timeout: 2500 });
+      if (confirmEl) { if (!active()) { dismissUi(DISMISS_SCOPES); return 'aborted'; } confirmEl.click(); confirmed = true; }
+    }
+    const snap = snapshotItem(freshItemNode(target) || item);
+    // Reactivate moves the row from the inactive section back to active.
+    const verdict = await verifyProcessed(target, snap);
+    if (verdict) {
+      state.skipSet.add(target);
+      state.stats.processed++;
+      state.progress++;
+      if (secSelFor(item)) state.matchSels.add(secSelFor(item));
+      if (state.autoProtect) addProtectedEmails([target]);
+      recordUndo({ type: 'deactivate', email: target, prevLabel: priorLabel });
+      addLog('success', t('reactivate_done', { email: target }));
+      broadcastState();
+      return 'reactivated';
+    }
+    dismissUi(DISMISS_SCOPES);
+    if (attempt === 2) { state.stats.failed++; state.skipSet.add(target); addLog('error', t('err_verify', { email: target })); return 'failed'; }
+    addLog('warning', t('retry_note', { email: target }));
+    await sleep(500);
+  }
+  return 'failed';
+}
+async function runReactivateLoop() {
+  if (loopActive) return;
+  loopActive = true;
+  try {
+    const queue = [];
+    if (state.reactivateSource === 'label') {
+      // The label filter is resolved through the same lazy-aware search the
+      // rest of the engine uses, so a partially rendered list can never make us
+      // claim "nothing matches". Each target is looked up individually, which
+      // also keeps the run resumable after a stop.
+      const wantLabel = state.reactivateLabel;
+      const probe = el => {
+        const email = extractEmail(el);
+        if (!email || state.skipSet.has(email)) return false;
+        if (state.flaggedWords.length && firstMatchingTerm(labelOf(el), state.flaggedWords, state.flaggedMatchMode || 'contains')) { state.skipSet.add(email); return false; }
+        if (isInInactiveSection(el) === false) return false;   // already active, nothing to reactivate
+        return matchesFilter(labelOf(el), wantLabel, state.matchMode);
+      };
+      const seen = new Set();
+      for (;;) {
+        const found = await scrollUntilFound(el => {
+          if (!probe(el)) return false;
+          const email = extractEmail(el);
+          if (seen.has(email)) return false;
+          return true;
+        });
+        if (found === EXHAUSTED || !found) break;
+        const email = extractEmail(found);
+        if (!seen.has(email)) { seen.add(email); queue.push(email); }
+        // keep the DOM reference from being picked again in the next sweep
+        state.skipSet.add(email);
+      }
+      // restore: the queue is processed after resolution
+      for (const email of queue) state.skipSet.delete(email);
+      state.reactivateResults.resolvedFromLabel = queue.length;
+      if (!queue.length) {
+        addLog('warning', t('reactivate_no_label_match', { label: wantLabel }));
+        finishRun('goal');
+        return;
+      }
+    } else {
+      queue.push(...state.reactivateTargets);
+    }
+    state.limit = queue.length;
+    for (const target of queue) {
+      if (!active()) break;
+      state.currentItem = target;
+      updateOverlay(); broadcastState();
+      const res = await processReactivateOne(target);
+      if (res === 'aborted') break;
+      state.reactivateResults[target] = res;
+      state.progress++;
+      if (res === 'notFound') {
+        state.stats.notFound++;
+        addLog('warning', t('reactivate_not_found', { email: target }));
+      } else if (res !== 'reactivated') {
+        state.progress--; // not actually completed
+      }
+      broadcastState();
+      if (!active()) break;
+      if (state.botState === 'pausing') {
+        state.botState = 'paused';
+        addLog('warning', t('bot_paused'));
+        updateOverlay(); broadcastState();
+        await waitFor(() => state.botState !== 'paused' ? true : null, { timeout: 3600000, interval: 250 });
+        if (!active()) break;
+      }
+      await sleep(jitteredDelay());
+    }
+    if (active()) finishRun('goal');
+  } finally {
+    loopActive = false;
+    if (startPending) { startPending = false; if (running()) (state.mode === 'reactivate' ? runReactivateLoop() : state.mode === 'rename' ? runRenameLoop() : runLoop()); }
+  }
+}
+
+// Record reversible actions of the current run so "Undo last run" can walk them
+// back. Permanent deletion is deliberately NOT recorded (it cannot be undone).
+function recordUndo(entry) {
+  if (state.mode === 'delete') return;
+  if (!state.lastRunUndo || state.lastRunUndo.mode !== state.mode || !state.lastRunUndo.open) {
+    state.lastRunUndo = { mode: state.mode, ts: Date.now(), open: true, entries: [] };
+  }
+  state.lastRunUndo.entries.push(entry);
+  if (state.lastRunUndo.entries.length > 200) state.lastRunUndo.entries.shift();
+}
+function closeUndo() {
+  if (state.lastRunUndo && state.lastRunUndo.open) {
+    state.lastRunUndo.open = false;
+    state.lastRunUndo = null; // only the most recent run is undoable
+  }
+}
+// Re-read the actual page state at the end of a run and report the delta
+// against what the bot believed it did (no invented successes).
+async function verifyActualResults(runUndo) {
+  const s = state.stats;
+  const verifyable = runUndo && runUndo.entries ? runUndo.entries.length : 0;
+  if (!verifyable) return null;
+  await sleep(600);
+  let actual = 0;
+  for (const e of runUndo.entries) {
+    const found = queryEmailItems().find(el => extractEmail(el) === e.email);
+    if (!found) continue;
+    if (e.type === 'rename' && matchesFilter(labelOf(found), e.prevLabel, 'exact')) actual++;
+    else if (e.type === 'deactivate') actual++;
+  }
+  return { expected: verifyable, actual, claimed: s.processed };
+}
+
+function startReactivate(source, label, targets, delay) {
+  if (!isTrained('reactivate')) { addLog('error', t('not_trained') + ' ' + t('untrained_reactivate_hint')); broadcastState(); return false; }
+  if (!isCapableFrame()) { addLog('error', t('err_wrong_frame')); broadcastState(); return false; }
+  if (source === 'label' && !String(label || '').trim()) { addLog('error', t('reactivate_empty_label')); broadcastState(); return false; }
+  if (source === 'list' && (!Array.isArray(targets) || !targets.length)) { addLog('error', t('reactivate_empty_list')); broadcastState(); return false; }
+  state.mode = 'reactivate';
+  state.selectors = { ...state.selectors, ...(state.cachedSelectors.reactivate || {}) };
+  createOverlay();
+  resetRunState();
+  state.reactivateSource = source === 'list' ? 'list' : 'label';
+  state.reactivateLabel = String(label || '').trim();
+  state.reactivateTargets = [...new Set((targets || []).map(normalizeEmail).filter(Boolean))];
+  state.reactivateResults = {};
+  state.reactivateSearchExhausted = false;
+  state.delay = parseInt(delay) || state.delay;
+  state.limit = state.reactivateSource === 'list' ? state.reactivateTargets.length : 0;
+  state.botState = 'running';
+  chrome.storage.local.set({ hmeBotClaim: { key: frameKey, ts: Date.now() } });
+  addLog('info', state.reactivateSource === 'list'
+    ? t('reactivate_started_list', { n: state.reactivateTargets.length })
+    : t('reactivate_started_label', { label: state.reactivateLabel }));
+  updateOverlay(); broadcastState();
+  if (loopActive) startPending = true; else runReactivateLoop();
+  return true;
+}
+
+// Undo: walk back the reversible entries of the last run (rename label restore
+// and reactivate -> deactivate). Deletions are never in here by design.
+async function undoLastRun() {
+  const undo = state.lastRunUndo;
+  if (!undo || !undo.entries || !undo.entries.length) {
+    addLog('warning', t('undo_nothing'));
+    return false;
+  }
+  if (state.botState !== 'idle') { addLog('warning', t('undo_busy')); return false; }
+  const prevMode = state.mode;
+  state.mode = undo.mode;
+  state.selectors = { ...state.selectors, ...(state.cachedSelectors[undo.mode] || {}) };
+  state.botState = 'running';
+  resetRunState();
+  state.progress = 0;
+  state.limit = undo.entries.length;
+  const entries = undo.entries.slice().reverse();
+  let ok = 0, fail = 0;
+  for (const e of entries) {
+    if (!active()) break;
+    state.currentItem = e.email;
+    try {
+      if (e.type === 'rename') {
+        const item = await findTargetItem(e.email);
+        if (item === EXHAUSTED || !item) { fail++; continue; }
+        let node = freshItemNode(e.email) || item;
+        try { node.scrollIntoView({ block: 'center' }); } catch (err) {}
+        await sleep(120);
+        (freshItemNode(e.email) || node).click();
+        const input = await waitFor(() => { const el = findElement(state.selectors.labelInput); return el && isVisible(el) ? el : null; }, { timeout: 5000 });
+        if (!input) { fail++; continue; }
+        const cur = await waitForStableInput(() => { const el = findElement(state.selectors.labelInput); return el && isVisible(el) ? el : null; });
+        if (cur === null) { fail++; continue; }
+        if (normalizeLabel(cur) !== normalizeLabel(e.prevLabel)) setInputValue(findElement(state.selectors.labelInput), e.prevLabel || '');
+        await sleep(80);
+        const save = await waitFor(() => { const el = findElement(state.selectors.save); return el && isVisible(el) && !el.disabled ? el : null; }, { timeout: 4000 });
+        if (!save) { fail++; continue; }
+        save.click();
+        await sleep(state.delay);
+        ok++;
+      } else if (e.type === 'deactivate') {
+        // reactivate was undone: put the address back to inactive
+        const item = await findTargetItem(e.email);
+        if (item === EXHAUSTED || !item) { fail++; continue; }
+        let node = freshItemNode(e.email) || item;
+        try { node.scrollIntoView({ block: 'center' }); } catch (err) {}
+        await sleep(120);
+        (freshItemNode(e.email) || node).click();
+        const findAction = () => { const el = findElement(state.selectors.deactivate); return el && isVisible(el) && !el.disabled ? el : null; };
+        const actionEl = await waitFor(findAction, { timeout: 5000 });
+        if (!actionEl) { fail++; continue; }
+        const snap = snapshotItem(freshItemNode(e.email) || item);
+        actionEl.click();
+        const confirmEl = await waitFor(() => { const el = findElement(state.selectors.confirm); return el && isVisible(el) && !el.disabled ? el : null; }, { timeout: 3000 });
+        if (confirmEl) confirmEl.click();
+        const v = await verifyProcessed(e.email, snap);
+        if (v) ok++; else fail++;
+        dismissUi(DISMISS_SCOPES);
+      }
+    } catch (err) { fail++; }
+    await sleep(Math.max(300, Math.round(state.delay / 3)));
+  }
+  state.lastRunUndo = null;
+  state.mode = prevMode;
+  haltLocal();
+  addLog(ok && !fail ? 'success' : 'warning', t('undo_done', { ok, fail }));
+  return true;
+}
+
 function resetRunState() {
   state.progress = 0;
   state.stats = { processed: 0, skippedFlagged: 0, skippedProtected: 0, failed: 0, notFound: 0, mismatch: 0 };
@@ -1286,6 +1746,9 @@ function resetRunState() {
   state.mismatchSels = new Set();
   state.matchSels = new Set();
   state.renameResults = {};
+  state.renamePrevLabels = {};
+  state.reactivateResults = {};
+  state.reactivateSearchExhausted = false;
   renameSearchExhausted = false;
   state.currentItem = '';
   runFinished = false;
@@ -1301,12 +1764,29 @@ function finishRun(reason) {
     processed: s.processed, flagged: s.skippedFlagged, protected: s.skippedProtected,
     failed: s.failed, notFound: s.notFound, mismatch: s.mismatch
   }));
+  const runUndo = state.lastRunUndo;
   const summary = {
     ts: Date.now(), mode: state.mode, reason, limit: state.limit, progress: state.progress, ...s
   };
   state.lastSummary = summary;
+  // Persist the summary immediately so the popup is never stuck "running",
+  // then attach the ground-truth check asynchronously.
   chrome.storage.local.set({ hmeLastSummary: summary });
   haltLocal();
+  if (runUndo && runUndo.entries && runUndo.entries.length && state.mode !== 'delete') {
+    verifyActualResults(runUndo).then(v => {
+      if (!v) return;
+      const delta = v.claimed - v.actual;
+      state.lastSummary = { ...summary, verified: v };
+      chrome.storage.local.set({ hmeLastSummary: { ...summary, verified: v } });
+      addLog(delta === 0 ? 'success' : 'warning',
+        t('verify_report', { expected: v.expected, actual: v.actual, claimed: v.claimed }));
+      broadcastState();
+      closeUndo();
+    }).catch(() => {});
+  } else {
+    closeUndo();
+  }
 }
 
 function haltLocal() {
@@ -1455,10 +1935,17 @@ function updateOverlay() {
 
   if (state.trainingStep > 0) {
     title = t('overlay_training') + ' ' + state.trainingStep + '/' + TRAINING_STEPS[state.mode].length;
-    color = '#4f8cff';
+    color = '#e0a340';
     const inst = (locales[state.lang]['inst_' + state.mode] || [])[state.trainingStep] || '';
-    body = `<div style="color:#9fb0cc;margin-bottom:8px">${inst}</div>
-      <button data-ov="cancel" style="width:100%;padding:5px 0;border:1px solid #2a3a55;border-radius:6px;background:transparent;color:#c7d2e5;font:12px -apple-system,BlinkMacSystemFont,system-ui,sans-serif;cursor:pointer">${t('overlay_cancel')}</button>`;
+    const stepKey = TRAINING_STEPS[state.mode][state.trainingStep - 1];
+    const optionalNow = (OPTIONAL_TRAINING_STEPS[state.mode] || []).includes(stepKey);
+    const skipBtn = optionalNow
+      ? `<button data-ov="skipstep" style="flex:1;padding:5px 0;border:1px solid #4a3f30;border-radius:6px;background:transparent;color:#e0a340;font:600 12px -apple-system,BlinkMacSystemFont,system-ui,sans-serif;cursor:pointer">${t('btn_skip_step')}</button>` : '';
+    body = `<div style="color:#c9bda8;margin-bottom:8px">${inst}</div>
+      <div style="display:flex;gap:6px">
+        ${skipBtn}
+        <button data-ov="cancel" style="flex:1;padding:5px 0;border:1px solid #4a3f30;border-radius:6px;background:transparent;color:#c7d2e5;font:12px -apple-system,BlinkMacSystemFont,system-ui,sans-serif;cursor:pointer">${t('overlay_cancel')}</button>
+      </div>`;
   } else if (state.botState !== 'idle') {
     const pct = state.limit ? Math.min(100, Math.round(state.progress / state.limit * 100)) : 0;
     title = state.botState === 'paused' ? t('overlay_paused') : state.botState === 'pausing' ? t('overlay_pausing') : t('mod_' + state.mode);
@@ -1569,6 +2056,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       startTraining();
       sendResponse({ status: 'ok', state: publicState() });
       break;
+    case 'SKIP_TRAINING_STEP':
+      sendResponse({ status: skipTrainingStep() ? 'ok' : 'error', state: publicState() });
+      break;
     case 'RESET_TRAINING':
       resetTraining();
       sendResponse({ status: 'ok', state: publicState() });
@@ -1577,13 +2067,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (!req.targeted && !isCapableFrame()) { sendResponse({ status: 'wrong_frame' }); break; }
       sendResponse({ status: startBot(req.limit, req.delay, req.jitter, req.mode) ? 'ok' : 'error', state: publicState() });
       break;
-    case 'START_RENAME':
+    case 'START_REACTIVATE':
       if (!req.targeted && !isCapableFrame()) { sendResponse({ status: 'wrong_frame' }); break; }
-      sendResponse({ status: startRename(req.targets, req.label, req.delay) ? 'ok' : 'error', state: publicState() });
+      sendResponse({ status: startReactivate(req.source, req.label, req.targets, req.delay) ? 'ok' : 'error', state: publicState() });
       break;
-    case 'PAUSE_BOT': pauseBot(); sendResponse({ status: 'ok', state: publicState() }); break;
-    case 'RESUME_BOT': resumeBot(); sendResponse({ status: 'ok', state: publicState() }); break;
-    case 'STOP_BOT': stopBot(true); sendResponse({ status: 'ok', state: publicState() }); break;
+    case 'UNDO_LAST_RUN':
+      undoLastRun().then(ok => sendResponse({ status: ok ? 'ok' : 'error', state: publicState() }));
+      return true;
+    case 'UPDATE_MATCH_MODE':
+      if (MATCH_MODES.includes(req.matchMode)) state.matchMode = req.matchMode;
+      if (MATCH_MODES.includes(req.flaggedMatchMode)) state.flaggedMatchMode = req.flaggedMatchMode;
+      chrome.storage.local.set({ hmeMatchMode: state.matchMode, hmeFlaggedMatchMode: state.flaggedMatchMode });
+      sendResponse({ status: 'ok', state: publicState() });
+      break;
     case 'CLEAR_LOGS':
       state.logs = [];
       sendResponse({ status: 'ok', state: publicState() });

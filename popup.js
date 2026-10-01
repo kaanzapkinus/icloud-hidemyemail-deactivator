@@ -10,7 +10,7 @@ const locales = {
     conn_connected: 'Connected — {mod} module · frame #{frame}',
     conn_offline: 'No iCloud HME frame found. Open icloud.com → Hide My Email.',
     btn_reconnect: 'Reconnect',
-    tab_run: 'Run', tab_training: 'Training', tab_rename: 'Rename', tab_protect: 'Protection', tab_logs: 'Logs',
+    tab_run: 'Run', tab_training: 'Training', tab_rename: 'Rename', tab_reactivate: 'Reactivate', tab_protect: 'Protection', tab_logs: 'Logs',
     label_module: 'Module',
     mode_deactivate: 'Deactivate', mode_delete: 'Delete', mode_rename: 'Rename',
     label_delay: 'Delay (ms)', label_limit: 'Limit (count)',
@@ -22,8 +22,12 @@ const locales = {
     training_hint: 'Start training, then click the 3 elements on the iCloud page, in order.',
     btn_start_training: 'Start Training', btn_reset: 'Reset',
     step_email: 'Email item in the list',
-    step_action_deactivate: '"Deactivate" button',
-    step_action_delete: '"Delete" button',
+    mode_deactivate: 'Deactivate', mode_delete: 'Delete', mode_rename: 'Rename', mode_reactivate: 'Reactivate',
+    step_confirm: 'Confirm button in the dialog',
+    step_label_input: 'Label input field',
+    step_save: '"Save changes" button',
+    step_action_reactivate: '"Reactivate address" button', step_confirm_optional: 'Confirm (optional)',
+    verify_report: 'Expected {expected} · page shows {actual} · bot reported {claimed}.',
     step_confirm: 'Confirm button in the dialog',
     step_label_input: 'Label input field',
     step_save: '"Save changes" button',
@@ -33,6 +37,15 @@ const locales = {
     label_auto_protect: 'Automatically add renamed addresses to the protection list',
     btn_start_rename: 'Start Rename',
     parse_valid: '{valid} valid address(es)', parse_ignored: '{n} line(s) ignored',
+    label_match_mode: 'Filter matching', match_exact: 'Exact', match_contains: 'Contains', match_word: 'Word',
+    match_mode_hint: '"Contains" also skips "Sakın silme Nintendo Switch".',
+    undo_available: 'Last run can be undone:', btn_undo: 'Undo',
+    verify_title: 'Ground truth check', verify_ok: 'Page confirms the run', verify_mismatch: 'Page shows fewer changes than reported',
+    reactivate_desc: 'Move addresses from the inactive list back to active. Choose the source: a label filter or a pasted address list.',
+    label_source: 'Source', src_label: 'By label', src_list: 'By address list',
+    label_react_label: 'Label to reactivate', reactivate_label_hint: 'Uses the filter matching mode above.',
+    label_react_targets: 'Addresses (one per line)', btn_start_reactivate: 'Reactivate',
+    res_reactivated: 'reactivated', res_mismatch: 'action not available', res_aborted: 'stopped',
     res_renamed: 'renamed', res_already: 'already set', res_not_found: 'not found', res_failed: 'failed',
     protect_desc: 'Protected addresses are never clicked during a Delete run. Protection uses both the exact address list and the protected label (double safety).',
     label_protected_label: 'Protected label',
@@ -49,14 +62,13 @@ const locales = {
     copied: 'Copied ✓',
     summary_title: 'Last run',
     reason_goal: 'goal reached', reason_exhausted: 'list exhausted', reason_stopped: 'stopped',
-    current_prefix: 'Current:'
   },
   tr: {
     conn_searching: 'iCloud HME çerçevesi aranıyor…',
     conn_connected: 'Bağlı — {mod} modülü · çerçeve #{frame}',
     conn_offline: 'iCloud HME çerçevesi bulunamadı. icloud.com → E-postamı Gizle sayfasını açın.',
-    btn_reconnect: 'Yeniden bağlan',
-    tab_run: 'Çalıştır', tab_training: 'Eğitim', tab_rename: 'Yeniden Adlandır', tab_protect: 'Koruma', tab_logs: 'Günlük',
+    mode_deactivate: 'Devre Dışı Bırak', mode_delete: 'Kalıcı Sil', mode_rename: 'Yeniden Adlandır', mode_reactivate: 'Yeniden Aktifleştir',
+    tab_run: 'Çalıştır', tab_training: 'Eğitim', tab_rename: 'Yeniden Adlandır', tab_reactivate: 'Yeniden Aktifleştir', tab_protect: 'Koruma', tab_logs: 'Günlük',
     label_module: 'Modül',
     mode_deactivate: 'Devre Dışı Bırak', mode_delete: 'Kalıcı Sil', mode_rename: 'Yeniden Adlandır',
     label_delay: 'Gecikme (ms)', label_limit: 'Limit (adet)',
@@ -87,6 +99,18 @@ const locales = {
     label_protected_list: 'Korumalı adresler',
     prot_empty: 'Liste boş. Elle ekleyin veya Yeniden Adlandır sekmesini kullanın.',
     title_logs: 'İşlem günlüğü', btn_clear: 'Temizle',
+    label_match_mode: 'Filtre eşleştirme', match_exact: 'Tam eşleşme', match_contains: 'İçinde geçse', match_word: 'Kelime bazlı',
+    match_mode_hint: '"İçinde geçse" modu "Sakın silme Nintendo Switch" etiketini de atlar.',
+    undo_available: 'Son koşu geri alınabilir:', btn_undo: 'Geri al',
+    verify_title: 'Gerçek durum kontrolü', verify_ok: 'Sayfa koşuyu doğruluyor', verify_mismatch: 'Sayfa, bildirilenden az değişiklik gösteriyor',
+    reactivate_desc: 'Adresleri pasif listeden tekrar aktif listeye taşıyın. Kaynağı seçin: etiket filtresi veya yapıştırılan adres listesi.',
+    label_source: 'Kaynak', src_label: 'Etikete göre', src_list: 'Adres listesine göre',
+    label_react_label: 'Yeniden aktifleştirilecek etiket', reactivate_label_hint: 'Yukarıdaki filtre eşleştirme modunu kullanır.',
+    label_react_targets: 'Adresler (satır başına bir tane)', btn_start_reactivate: 'Yeniden Aktifleştir',
+    res_reactivated: 'yeniden aktifleştirildi', res_mismatch: 'işlem butonu yok', res_aborted: 'durduruldu',
+    step_action_reactivate: '"Yeniden etkinleştir" butonu', step_confirm_optional: 'Onay (isteğe bağlı)',
+    verify_report: 'Beklenen {expected} · sayfada {actual} · bot {claimed} bildirdi.',
+    verify_title: 'Gerçek durum kontrolü', verify_ok: 'Sayfa koşuyu doğruluyor', verify_mismatch: 'Sayfa, bildirilenden az değişiklik gösteriyor',
     footer_text: 'iCloud.com → E-postamı Gizle sayfası açık olmalıdır.',
     status_offline: 'Çevrimdışı', status_ready: 'Hazır', status_untrained: 'Eğitilmedi',
     status_training: 'Eğitimde', status_running: 'Çalışıyor', status_paused: 'Duraklatıldı',
@@ -109,8 +133,11 @@ const t = (key, vars) => {
 const STEP_KEYS = {
   deactivate: ['email', 'deactivate', 'confirm'],
   delete: ['email', 'deactivate', 'confirm'],
-  rename: ['email', 'labelInput', 'save']
+  rename: ['email', 'labelInput', 'save'],
+  reactivate: ['email', 'deactivate', 'confirm']
 };
+// Steps the site may not have (Apple reactivates without a confirm dialog)
+const OPTIONAL_STEPS = { reactivate: ['confirm'] };
 const EMAIL_LINE_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
 // ---------------------------------------------------------------------------
@@ -146,13 +173,53 @@ function init() {
       chrome.storage.local.set({ hmeLastMode: mode });
       sendAction('SET_MODE', { mode });
       currentMode = mode;
-      syncSegs();
       if (lastState) renderSteps({ ...lastState, mode });
       refreshButtons();
     });
   });
 
+  // ---- skip optional training step
+  $('btnSkipStep').addEventListener('click', () => sendAction('SKIP_TRAINING_STEP'));
+
+  // ---- filter matching mode (protected label + blacklist)
+  document.querySelectorAll('#matchSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sendAction('UPDATE_MATCH_MODE', { matchMode: btn.dataset.mode });
+      syncMatchSeg();
+    });
+  });
+
   // ---- settings persistence
+
+  // ---- undo last run
+  $('btnUndo').addEventListener('click', () => sendAction('UNDO_LAST_RUN'));
+
+  // ---- reactivate source + actions
+  document.querySelectorAll('#reactSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#reactSeg button').forEach(b => b.classList.toggle('active', b === btn));
+      const byLabel = btn.dataset.source === 'label';
+      $('reactLabelBox').classList.toggle('hidden', !byLabel);
+      $('reactListBox').classList.toggle('hidden', byLabel);
+      refreshButtons();
+    });
+  });
+  $('inputReactLabel').addEventListener('input', () => {
+    chrome.storage.local.set({ hmeReactivateLabel: $('inputReactLabel').value });
+    refreshButtons();
+  });
+  $('txtReactTargets').addEventListener('input', () => { renderReactParseInfo(); refreshButtons(); });
+  $('btnStartReactivate').addEventListener('click', () => {
+    const byLabel = document.querySelector('#reactSeg button.active').dataset.source === 'label';
+    sendAction('START_REACTIVATE', {
+      source: byLabel ? 'label' : 'list',
+      label: $('inputReactLabel').value,
+      targets: byLabel ? [] : parseEmailList($('txtReactTargets').value).valid,
+      delay: parseInt($('inputDelay').value) || 1500
+    });
+    switchTab('reactivate');
+  });
+  $('btnStopReactivate').addEventListener('click', () => sendAction('STOP_BOT'));
   $('inputDelay').addEventListener('change', () => chrome.storage.local.set({ hmeDelay: $('inputDelay').value }));
   $('inputLimit').addEventListener('change', () => chrome.storage.local.set({ hmeLimit: $('inputLimit').value }));
   $('chkJitter').addEventListener('change', () => chrome.storage.local.set({ hmeJitter: $('chkJitter').checked }));
@@ -413,10 +480,9 @@ function setLang(lang) {
   applyI18n();
   sendAction('SET_LANG', { lang });
 }
-
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  for (const p of ['run', 'training', 'rename', 'protect', 'logs']) {
+  for (const p of ['run', 'training', 'rename', 'reactivate', 'protect', 'logs']) {
     $('panel-' + p).classList.toggle('hidden', p !== name);
   }
 }
@@ -440,8 +506,63 @@ function syncSegs() {
 
 function stepLabels(mode) {
   if (mode === 'rename') return [t('step_email'), t('step_label_input'), t('step_save')];
+  if (mode === 'reactivate') return [t('step_email'), t('step_action_reactivate'), t('step_confirm_optional')];
   return [t('step_email'), mode === 'delete' ? t('step_action_delete') : t('step_action_deactivate'), t('step_confirm')];
 }
+
+function syncMatchSeg() {
+  const m = (lastState && lastState.matchMode) || 'contains';
+  document.querySelectorAll('#matchSeg button').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+}
+
+function renderVerify(st) {
+  const box = $('verifyBox');
+  const v = st && st.lastSummary && st.lastSummary.verified;
+  if (!v) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const ok = v.actual >= v.claimed;
+  box.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = ok ? 'v-ok' : 'v-warn';
+  title.textContent = (ok ? '✓ ' : '⚠ ') + t('verify_title');
+  const line = document.createElement('div');
+  line.className = 'v-line';
+  line.textContent = t('verify_report')
+    .replace('{expected}', v.expected).replace('{actual}', v.actual).replace('{claimed}', v.claimed);
+  box.append(title, line);
+}
+
+function renderReactResults(results) {
+  const box = $('reactResults');
+  const entries = Object.entries(results || {}).filter(([k]) => k !== 'resolvedFromLabel');
+  box.classList.toggle('hidden', entries.length === 0);
+  const icons = { reactivated: '✓', notFound: '?', mismatch: '⊘', failed: '✗', aborted: '⏸' };
+  box.innerHTML = '';
+  for (const [email, status] of entries) {
+    const row = document.createElement('div');
+    row.className = 'res-row ' + status;
+    const ico = document.createElement('span');
+    ico.className = 'ico';
+    ico.textContent = icons[status] || '·';
+    const mail = document.createElement('span');
+    mail.className = 'mail';
+    mail.textContent = email;
+    const stt = document.createElement('span');
+    stt.className = 'st';
+    stt.textContent = t('res_' + status) || status;
+    row.append(ico, mail, stt);
+    box.appendChild(row);
+  }
+}
+
+function renderReactParseInfo() {
+  const raw = $('txtReactTargets').value;
+  const info = $('reactParseInfo');
+  if (!raw.trim()) { info.textContent = ''; return; }
+  const { valid, ignored } = parseEmailList(raw);
+  info.textContent = t('parse_valid', { valid: valid.length }) + (ignored ? ' · ' + t('parse_ignored', { n: ignored }) : '');
+}
+
 
 function renderSteps(st) {
   const mode = (st && st.mode) || currentMode;
@@ -488,11 +609,13 @@ function updateUI(st) {
   syncSegs();
   refreshChip();
 
-  // run progress (deactivate/delete)
+  // run progress (deactivate/delete/reactivate share the loop; rename has its own)
   const isRename = st.mode === 'rename';
+  const isReact = st.mode === 'reactivate';
   const running = st.botState !== 'idle';
-  $('progressBox').classList.toggle('hidden', isRename || !running);
+  $('progressBox').classList.toggle('hidden', isRename || isReact || !running);
   $('renameProgress').classList.toggle('hidden', !isRename || !running);
+  $('reactProgress').classList.toggle('hidden', !isReact || !running);
   if (running) {
     const pct = st.limit ? Math.min(100, Math.round(st.progress / st.limit * 100)) : 0;
     if (isRename) {
@@ -517,7 +640,14 @@ function updateUI(st) {
 
   renderResults(st.renameResults || {});
   renderSummary(st.lastSummary);
+  renderVerify(st);
+  renderReactResults(st.reactivateResults || {});
   renderSteps(st);
+  syncMatchSeg();
+  // undo availability
+  $('undoBox').classList.toggle('hidden', !st.undoAvailable || busy);
+  if (st.undoAvailable) $('undoCount').textContent = st.undoCount;
+  if (document.activeElement !== $('inputReactLabel') && st.reactivateLabel) $('inputReactLabel').value = st.reactivateLabel;
 
   // protection sync (avoid clobbering while typing)
   $('protectCountRun').textContent = (st.protectedEmails || []).length;
@@ -557,6 +687,15 @@ function refreshButtons() {
   const renameBusy = st && st.botState !== 'idle' && st.mode === 'rename';
   $('btnStartRename').disabled = !connected || !renameTrained || !valid.length || !hasLabel || (st && st.botState !== 'idle');
   $('btnStopRename').disabled = !connected || !renameBusy;
+
+  // reactivate
+  const reactTrained = st && st.trained && st.trained.reactivate;
+  const reactBusy = busy && st.mode === 'reactivate';
+  const byLabel = (document.querySelector('#reactSeg button.active') || { dataset: { source: 'label' } }).dataset.source === 'label';
+  const reactOk = byLabel ? $('inputReactLabel').value.trim().length > 0 : parseEmailList($('txtReactTargets').value).valid.length > 0;
+  $('btnStartReactivate').disabled = !connected || !reactTrained || !reactOk || busy || (st && st.trainingStep > 0);
+  $('btnStopReactivate').disabled = !connected || !reactBusy;
+  $('btnUndo').disabled = !connected || busy || !st.undoAvailable;
 
   // mode segment locks while running
   document.querySelectorAll('#modeSeg button, #trainModeSeg button').forEach(b => { b.disabled = !!busy; });

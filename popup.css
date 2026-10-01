@@ -1,18 +1,21 @@
-/* HME Bot — popup, modern dark minimal */
+/* HME Bot — popup, warm amber (omp) theme */
 :root {
-  --bg: #0d1117;
-  --panel: #161b22;
-  --panel-2: #1c2129;
-  --border: #262d38;
-  --border-strong: #363f4d;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --accent: #4f8cff;
-  --accent-hover: #6ba1ff;
-  --ok: #3fb950;
-  --warn: #d29922;
-  --danger: #f85149;
-  --radius: 8px;
+  --bg: #16130f;
+  --panel: #1e1a15;
+  --panel-2: #262119;
+  --border: #342c22;
+  --border-strong: #4a3f30;
+  --text: #f0e9dd;
+  --muted: #a1927e;
+  --accent: #e0a340;
+  --accent-hover: #f0b95c;
+  --accent-soft: rgba(224, 163, 64, .14);
+  --accent-border: rgba(224, 163, 64, .38);
+  --ok: #7fb069;
+  --warn: #e0a340;
+  --danger: #d1654f;
+  --info: #c9a227;
+  --radius: 9px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -44,7 +47,7 @@ html, body {
   background: transparent; border: 0; color: var(--muted);
   font: 600 11px/1 inherit; padding: 5px 8px; cursor: pointer;
 }
-.lang-btn.active { background: var(--accent); color: #fff; }
+.lang-btn.active { background: var(--accent); color: #1a1611; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -74,7 +77,7 @@ html, body {
   background: none; border: 0; color: var(--accent); cursor: pointer;
   font: 600 11px inherit; padding: 2px 4px; border-radius: 4px;
 }
-.link-btn:hover { background: rgba(79, 140, 255, .12); }
+.link-btn:hover { background: var(--accent-soft); }
 
 /* ---------- Tabs ---------- */
 .tabs {
@@ -88,7 +91,7 @@ html, body {
 }
 .tab:hover { color: var(--text); background: var(--panel); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.tab.flash { color: var(--accent); background: rgba(79, 140, 255, .1); }
+.tab.flash { color: var(--accent); background: var(--accent-soft); }
 
 /* ---------- Panels & fields ---------- */
 main { padding: 12px 14px 6px; }
@@ -105,7 +108,7 @@ input[type="number"], input[type="text"], textarea, select {
   padding: 7px 9px; font: 12.5px inherit; outline: none;
 }
 textarea { resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.5; }
-input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(79, 140, 255, .18); }
+input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 input:disabled, textarea:disabled { opacity: .5; }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -129,7 +132,7 @@ input:disabled, textarea:disabled { opacity: .5; }
   border-right: 1px solid var(--border);
 }
 .seg button:last-child { border-right: 0; }
-.seg button.active { background: var(--accent); color: #fff; }
+.seg button.active { background: var(--accent); color: #1a1611; }
 .seg button:disabled { opacity: .5; cursor: default; }
 
 /* ---------- Buttons ---------- */
@@ -140,7 +143,7 @@ input:disabled, textarea:disabled { opacity: .5; }
   transition: background .15s, opacity .15s;
 }
 .btn:disabled { opacity: .4; cursor: default; }
-.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary { background: var(--accent); color: #1a1611; }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn.warn { background: rgba(210, 153, 34, .16); color: var(--warn); border-color: rgba(210, 153, 34, .4); }
 .btn.warn:hover:not(:disabled) { background: rgba(210, 153, 34, .26); }
@@ -182,7 +185,7 @@ input:disabled, textarea:disabled { opacity: .5; }
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 8px 10px;
 }
-.step.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(79, 140, 255, .15); }
+.step.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .step.done { border-color: rgba(63, 185, 80, .5); }
 .step-num {
   width: 20px; height: 20px; border-radius: 50%; flex: none;
@@ -191,7 +194,7 @@ input:disabled, textarea:disabled { opacity: .5; }
   font-size: 11px; font-weight: 700; color: var(--muted);
 }
 .step.done .step-num { background: var(--ok); border-color: var(--ok); color: #fff; }
-.step.active .step-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+.step.active .step-num { background: var(--accent); border-color: var(--accent); color: #1a1611; }
 .step-label { flex: 1; font-size: 12px; }
 .badge {
   font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
@@ -199,7 +202,7 @@ input:disabled, textarea:disabled { opacity: .5; }
   white-space: nowrap;
 }
 .badge.set { color: var(--ok); border-color: rgba(63, 185, 80, .4); }
-.badge.waiting { color: var(--accent); border-color: rgba(79, 140, 255, .5); animation: pulse 1.2s infinite; }
+.badge.waiting { color: var(--accent); border-color: var(--accent-border); animation: pulse 1.2s infinite; }
 
 /* ---------- Rename results ---------- */
 .results {
@@ -271,3 +274,28 @@ input:disabled, textarea:disabled { opacity: .5; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- v2.2 additions: match segments, undo, verify, reactivate ---------- */
+.seg-3 button { font-size: 11.5px; padding: 7px 2px; }
+
+.undo-box {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius); padding: 8px 10px;
+  font-size: 11.5px; color: var(--muted);
+}
+.undo-box b { color: var(--text); }
+.undo-box .btn { flex: none; margin-left: auto; padding: 5px 12px; font-size: 11.5px; }
+
+.verify-box {
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--ok); border-radius: var(--radius);
+  padding: 8px 10px; font-size: 11.5px; color: var(--muted);
+}
+.verify-box .v-line { color: var(--text); margin-top: 2px; }
+.verify-box .v-ok { color: var(--ok); }
+.verify-box .v-warn { color: var(--warn); }
+
+.res-row.reactivated .ico { color: var(--ok); }
+.res-row.mismatch .ico, .res-row.aborted .ico { color: var(--warn); }

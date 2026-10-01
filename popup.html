@@ -31,6 +31,7 @@
     <button class="tab active" data-tab="run" data-i18n="tab_run">Run</button>
     <button class="tab" data-tab="training" data-i18n="tab_training">Training</button>
     <button class="tab" data-tab="rename" data-i18n="tab_rename">Rename</button>
+    <button class="tab" data-tab="reactivate" data-i18n="tab_reactivate">Reactivate</button>
     <button class="tab" data-tab="protect" data-i18n="tab_protect">Protection</button>
     <button class="tab" data-tab="logs" data-i18n="tab_logs">Logs</button>
   </nav>
@@ -66,6 +67,15 @@
         <label for="inputFlags" data-i18n="label_flags">Blacklist keywords (comma separated)</label>
         <input type="text" id="inputFlags" placeholder="netflix, spotify, important">
       </div>
+      <div class="field">
+        <label data-i18n="label_match_mode">Filter matching</label>
+        <div class="seg seg-3" id="matchSeg" role="group">
+          <button type="button" data-mode="exact" data-i18n="match_exact">Exact</button>
+          <button type="button" data-mode="contains" data-i18n="match_contains">Contains</button>
+          <button type="button" data-mode="word" data-i18n="match_word">Word</button>
+        </div>
+        <div class="hint" data-i18n="match_mode_hint">“Contains” also skips “Sakın silme Nintendo Switch”.</div>
+      </div>
 
       <div id="protectNote" class="note hidden">
         <span data-i18n="protect_note">Protected addresses are skipped in Delete mode:</span>
@@ -92,8 +102,50 @@
         </div>
         <div id="currentRow" class="current hidden"></div>
       </div>
+      <div id="undoBox" class="undo-box hidden">
+        <span data-i18n="undo_available">Last run can be undone:</span>
+        <b id="undoCount">0</b>
+        <button id="btnUndo" class="btn ghost" data-i18n="btn_undo">Undo</button>
+      </div>
 
       <div id="summaryBox" class="summary hidden"></div>
+      <div id="verifyBox" class="verify-box hidden"></div>
+    </section>
+
+    <!-- ================= REACTIVATE ================= -->
+    <section id="panel-reactivate" class="panel hidden">
+      <p class="desc" data-i18n="reactivate_desc">Move addresses from the inactive list back to active. Choose the source: a label filter or a pasted address list.</p>
+
+      <div class="field">
+        <label data-i18n="label_source">Source</label>
+        <div class="seg" id="reactSeg">
+          <button type="button" data-source="label" data-i18n="src_label">By label</button>
+          <button type="button" data-source="list" data-i18n="src_list">By address list</button>
+        </div>
+      </div>
+
+      <div id="reactLabelBox" class="field">
+        <label for="inputReactLabel" data-i18n="label_react_label">Label to reactivate</label>
+        <input type="text" id="inputReactLabel" placeholder="sakın silme">
+        <div class="hint" data-i18n="reactivate_label_hint">Uses the filter matching mode above.</div>
+      </div>
+
+      <div id="reactListBox" class="field hidden">
+        <label for="txtReactTargets" data-i18n="label_react_targets">Addresses (one per line)</label>
+        <textarea id="txtReactTargets" rows="5" spellcheck="false" placeholder="name@icloud.com"></textarea>
+        <div id="reactParseInfo" class="hint"></div>
+      </div>
+
+      <div class="btn-row">
+        <button id="btnStartReactivate" class="btn primary" disabled data-i18n="btn_start_reactivate">Reactivate</button>
+        <button id="btnStopReactivate" class="btn danger" disabled data-i18n="btn_stop">Stop</button>
+      </div>
+
+      <div id="reactProgress" class="progress-box hidden">
+        <div class="progress-info"><span id="reactProgressText">0 / 0</span><span id="reactProgressPct">0%</span></div>
+        <div class="bar"><div id="reactProgressFill" class="bar-fill"></div></div>
+      </div>
+      <div id="reactResults" class="results hidden"></div>
     </section>
 
     <!-- ================= TRAINING ================= -->
@@ -106,9 +158,9 @@
           <button type="button" data-mode="deactivate" data-i18n="mode_deactivate">Deactivate</button>
           <button type="button" data-mode="delete" data-i18n="mode_delete">Delete</button>
           <button type="button" data-mode="rename" data-i18n="mode_rename">Rename</button>
+          <button type="button" data-mode="reactivate" data-i18n="mode_reactivate">Reactivate</button>
         </div>
       </div>
-
       <ol class="steps" id="stepList">
         <li class="step" id="step1"><span class="step-num">1</span><span class="step-label" id="stepLabel1">—</span><span class="badge" id="badge1">—</span></li>
         <li class="step" id="step2"><span class="step-num">2</span><span class="step-label" id="stepLabel2">—</span><span class="badge" id="badge2">—</span></li>
@@ -120,6 +172,9 @@
         <button id="btnResetTraining" class="btn ghost" disabled data-i18n="btn_reset">Reset</button>
       </div>
       <p class="hint" data-i18n="training_hint">Start training, then click the 3 elements on the iCloud page, in order.</p>
+      <div class="btn-row">
+        <button id="btnSkipStep" class="btn ghost hidden" data-i18n="btn_skip_step">Skip this step</button>
+      </div>
     </section>
 
     <!-- ================= RENAME ================= -->

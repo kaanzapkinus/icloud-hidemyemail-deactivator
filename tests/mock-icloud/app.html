@@ -383,6 +383,8 @@
     }, COMMIT_DELAY);
   });
 
+  // Reactivate is a single click with NO confirmation (matches Apple). The
+  // optional confirm step in the extension is therefore skipped at runtime.
   btnReactivate.addEventListener('click', function () {
     if (detailPanel.classList.contains('hidden') || !selectedEmail) return;
     var email = selectedEmail;
@@ -439,8 +441,8 @@
     setLoadDelay: function (ms) { LOAD_DELAY = ms; },
     setPanelDelay: function (ms) { PANEL_DELAY = ms; },
     escapeCollapses: function (on) { window.__escapeCollapses = !!on; },
+    reactivateWithConfirm: function (on) { window.__reactivateConfirm = !!on; },
     escaped: function () { return window.__escapeCount || 0; },
-
     setLabel: function (email, label) {
       var item = findItem(email);
       if (!item) return false;
